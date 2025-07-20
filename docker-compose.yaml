@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  # Forces MCP Server
+  mcp-forces:
+    build:
+      context: .
+      dockerfile: Docker/Dockerfile
+    container_name: physics-assistant-forces
+    ports:
+      - "10100:10100"
+    environment:
+      - MCP_SERVICE=forces
+      - PYTHONPATH=/app/mcp_tools
+    command: ["uv", "run", "python", "-m", "physics_mcp_tools.forces_mcp_server", "--host", "0.0.0.0", "--port", "10100", "--transport", "streamable_http"]
+    restart: unless-stopped
+    networks:
+      - mcp-network
+
+  # Kinematics MCP Server  
+  mcp-kinematics:
+    build:
+      context: .
+      dockerfile: Docker/Dockerfile
+    container_name: physics-assistant-kinematics
+    ports:
+      - "10101:10100"
+    environment:
+      - MCP_SERVICE=kinematics
+      - PYTHONPATH=/app/mcp_tools
+    command: ["uv", "run", "python", "-m", "physics_mcp_tools.kinematics_mcp_server", "--host", "0.0.0.0", "--port", "10100", "--transport", "streamable_http"]
+    restart: unless-stopped
+    networks:
+      - mcp-network
+
+  # Circuit MCP Server
+  mcp-circuit:
+    build:
+      context: .
+      dockerfile: Docker/Dockerfile
+    container_name: physics-assistant-circuit
+    ports:
+      - "10102:10100"
+    environment:
+      - MCP_SERVICE=circuit
+      - PYTHONPATH=/app/mcp_tools
+    command: ["uv", "run", "python", "-m", "physics_mcp_tools.circuit_mcp_server", "--host", "0.0.0.0", "--port", "10100", "--transport", "streamable_http"]
+    restart: unless-stopped
+    networks:
+      - mcp-network
+
+networks:
+  mcp-network:
+    driver: bridge
+
+# Optional: Add volumes if you need persistent data
+# volumes:
+#   mcp-data:
+#     driver: local

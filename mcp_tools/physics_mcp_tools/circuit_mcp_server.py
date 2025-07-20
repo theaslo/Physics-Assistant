@@ -1,4 +1,6 @@
 # type: ignore
+from typing import List, Dict, Any
+
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.utilities.logging import get_logger
 import argparse
@@ -32,7 +34,7 @@ def serve(host, port, transport):
             I AM NOT YET IMPLEMENTED.
             """
 
-            return result
+        return result
 
     logger.info(
         f'{NAME} MCP Server at {host}:{port} and transport {transport}'

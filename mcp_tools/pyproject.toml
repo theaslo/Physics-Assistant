@@ -7,7 +7,7 @@ authors = [
 ]
 license = {text = "MIT"}
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 keywords = ["physics", "forces", "kinematics", "circuits", "mcp", "education"]
 
 dependencies = [
