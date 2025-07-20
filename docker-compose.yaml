@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Forces MCP Server
   mcp-forces:
@@ -12,7 +10,7 @@ services:
     environment:
       - MCP_SERVICE=forces
       - PYTHONPATH=/app/mcp_tools
-    command: ["uv", "run", "python", "-m", "physics_mcp_tools.forces_mcp_server", "--host", "0.0.0.0", "--port", "10100", "--transport", "streamable_http"]
+    command: ["uv", "run", "physics-mcp", "--run", "forces-server", "--host", "0.0.0.0", "--port", "10100", "--transport", "streamable_http"]
     restart: unless-stopped
     networks:
       - mcp-network
@@ -28,7 +26,7 @@ services:
     environment:
       - MCP_SERVICE=kinematics
       - PYTHONPATH=/app/mcp_tools
-    command: ["uv", "run", "python", "-m", "physics_mcp_tools.kinematics_mcp_server", "--host", "0.0.0.0", "--port", "10100", "--transport", "streamable_http"]
+    command: ["uv", "run", "physics-mcp", "--run", "kinematics-server", "--host", "0.0.0.0", "--port", "10100", "--transport", "streamable_http"]
     restart: unless-stopped
     networks:
       - mcp-network
@@ -44,7 +42,7 @@ services:
     environment:
       - MCP_SERVICE=circuit
       - PYTHONPATH=/app/mcp_tools
-    command: ["uv", "run", "python", "-m", "physics_mcp_tools.circuit_mcp_server", "--host", "0.0.0.0", "--port", "10100", "--transport", "streamable_http"]
+    command: ["uv", "run", "physics-mcp", "--run", "circuit-server", "--host", "0.0.0.0", "--port", "10100", "--transport", "streamable_http"]
     restart: unless-stopped
     networks:
       - mcp-network
