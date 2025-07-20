@@ -1,0 +1,4 @@
+This is not what I wanted. You should have asked! I want each directory in /Users/asli.tandogan_kunkel/Projects/Physics-Assistant to have their own pyproject.toml file with their own uv run commands. Please fix properly.
+
+
+I added a few more mcp servers to /Users/asli.tandogan_kunkel/Projects/Physics-Assistant/mcp_tools. This is the scaffolding of more to come. Please fix my pyproject.toml so that it runs properly with /Users/asli.tandogan_kunkel/Projects/Physics-Assistant/mcp_tools/__init__.py. I want to be able to run the command "uv run physics-mcp --run A-server --transport streamable_http" where A-server can be the forces_mcp_server or  any arg found in __init__.py. If you understand, complete it, if not, ask questions.
