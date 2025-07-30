@@ -51,7 +51,7 @@ def main():
     parser = argparse.ArgumentParser(description="Run Physics Circuit MCP Server")
     parser.add_argument("--run", default="mcp-server", help="Command to run")
     parser.add_argument("--host", default="localhost", help="Host to bind server to")
-    parser.add_argument("--port", type=int, default=10102, help="Port to bind server to")
+    parser.add_argument("--port", type=int, default=10103, help="Port to bind server to")
     parser.add_argument("--transport", default="streamable_http", help="Transport type")
     
     args = parser.parse_args()

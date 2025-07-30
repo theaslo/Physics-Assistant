@@ -31,6 +31,9 @@ def main(command, host, port, transport) -> None:
     elif command == 'kinematics-server':
         from physics_mcp_tools.kinematics_mcp_server import serve
         serve(host, port, transport)
+    elif command == 'math-server':
+        from physics_mcp_tools.math_mcp_server import serve
+        serve(host, port, transport)
     elif command == 'circuit-server':
         from physics_mcp_tools.circuit_mcp_server import serve
         serve(host, port, transport)

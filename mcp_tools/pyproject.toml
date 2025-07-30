@@ -1,14 +1,14 @@
 [project]
 name = "physics_mcp_tools"
 version = "0.1.0"
-description = "MCP tools for physics calculations and analysis (forces, kinematics, circuits)"
+description = "MCP tools for physics calculations and analysis (forces, kinematics, circuits, math)"
 authors = [
     {name = "Asli Tandogan Kunkel", email = "doogers@uconn.edu"}
 ]
 license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.13"
-keywords = ["physics", "forces", "kinematics", "circuits", "mcp", "education"]
+keywords = ["physics", "forces", "kinematics", "circuits", "math", "mcp", "education"]
 
 dependencies = [
     "fastmcp>=1.0.0",
