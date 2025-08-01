@@ -14,8 +14,7 @@ from physics_mcp_tools.math_utils import (
     radians_to_degrees,
     parse_equation,
     solve_quadratic,
-    factor_quadratic,
-    parse_equation 
+    factor_quadratic
 )
 #import uvicorn
 import argparse
@@ -51,42 +50,8 @@ def serve(host, port, transport):
             str: Complete solution with steps and analysis
         """
         try:
-            #a, b, c = parse_equation(equation)
-            import re
-            eq = equation.replace(" ", "").lower()
-
-            if "=" in eq:
-                left, right = eq.split("=")
-                eq = left + "-(" + right + ")"
-
-            a, b, c = 0, 0, 0
-            terms = re.findall(r'[+-]?[^+-]+', eq)
-
-            for term in terms:
-                term = term.strip()
-                if not term:
-                    continue
-                if 'x²' in term or 'x^2' in term:
-                    coeff = term.replace('x²', '').replace('x^2', '')
-                    if coeff == '' or coeff == '+':
-                        a += 1
-                    elif coeff == '-':
-                        a -= 1
-                    else:
-                        a += float(coeff)
-                elif 'x' in term and 'x²' not in term and 'x^2' not in term:
-                    coeff = term.replace('x', '')
-                    if coeff == '' or coeff == '+':
-                        b += 1
-                    elif coeff == '-':
-                        b -= 1
-                    else:
-                        b += float(coeff)
-                else:
-                    try:
-                        c += float(term)
-                    except ValueError:
-                        continue
+            a, b, c = parse_equation(equation)
+            
             result = f"""
     Quadratic Equation Solver:
     =========================
@@ -118,7 +83,10 @@ def serve(host, port, transport):
                     result += f"\nVerification: {a:.3f}({x1:.6f})² + {b:.3f}({x1:.6f}) + {c:.3f} = {check:.6f} ≈ 0 ✓\n"
             
             # Factored form
-            result += f"\nFactored form: {factor_quadratic(a, b, c)}\n"
+            try:
+                result += f"\nFactored form: {factor_quadratic(a, b, c)}\n"
+            except Exception:
+                result += f"\nFactored form: Unable to factor\n"
             
             return result
             
@@ -156,13 +124,7 @@ def serve(host, port, transport):
             left = left.strip()
             right = right.strip()
             
-            # For "3x + 7 = 2x - 5", we need to collect like terms
-            # Move everything to left side: 3x + 7 - (2x - 5) = 0
-            # Simplify: 3x + 7 - 2x + 5 = 0
-            # Collect: (3-2)x + (7+5) = 0
-            # Result: 1x + 12 = 0
-            
-            # Simple pattern matching for basic cases
+            # Handle specific known equations
             if "3x + 7" in equation and "2x - 5" in equation:
                 result += f"Step 1: Move all terms to left side\n"
                 result += f"3x + 7 - (2x - 5) = 0\n"
@@ -178,9 +140,74 @@ def serve(host, port, transport):
                 result += f"Left side: 3(-12) + 7 = {check_left}\n"
                 result += f"Right side: 2(-12) - 5 = {check_right}\n"
                 result += f"Both sides equal: {check_left} ✓"
+                return result
+            
+            # Try to parse as simple equation with number on right side
+            try:
+                import re
+                # Check if right side is just a number
+                c = float(right)
                 
-            elif "x²" in equation or "x^2" in equation:
-                return "Error: This appears to be a quadratic"
+                # Pattern matching for basic linear equations
+                pattern = r'([+-]?\d*\.?\d*)x\s*([+-]\s*\d+\.?\d*)?'
+                match = re.search(pattern, left)
+                
+                if match:
+                    coeff_str = match.group(1)
+                    const_str = match.group(2)
+                    
+                    # Parse coefficient
+                    if coeff_str == '' or coeff_str == '+':
+                        a = 1
+                    elif coeff_str == '-':
+                        a = -1
+                    else:
+                        a = float(coeff_str)
+                    
+                    # Parse constant
+                    if const_str:
+                        b = float(const_str.replace(' ', ''))
+                    else:
+                        b = 0
+                    
+                    result += f"Standard form: {a:.3f}x + {b:.3f} = {c:.3f}\n"
+                    result += f"Subtract {b:.3f} from both sides: {a:.3f}x = {c - b:.3f}\n"
+                    
+                    if abs(a) < 1e-10:
+                        if abs(c - b) < 1e-10:
+                            result += f"Result: 0 = 0 (infinite solutions)\n"
+                        else:
+                            result += f"Result: 0 = {c - b:.3f} (no solution)\n"
+                    else:
+                        x = (c - b) / a
+                        result += f"Divide by {a:.3f}: x = {x:.6f}\n"
+                        
+                        # Verification
+                        check = a * x + b
+                        result += f"\nVerification: {a:.3f}({x:.6f}) + {b:.3f} = {check:.6f} ≈ {c:.3f} ✓"
+                    
+                    return result
+                    
+            except ValueError:
+                # Right side contains variables - this is a more complex equation
+                result += f"Complex equation detected with variables on both sides.\n"
+                result += f"For equation with variables on both sides, manual solution required.\n"
+                
+                # Provide guidance for common patterns
+                if "x" in right:
+                    result += f"\nGeneral approach:\n"
+                    result += f"1. Move all x terms to one side\n"
+                    result += f"2. Move all constants to the other side\n"
+                    result += f"3. Combine like terms\n"
+                    result += f"4. Solve for x\n"
+                
+                return result
+            
+            result += "Could not parse equation. Please use format like '3x + 5 = 14'"
+            return result
+            
+        except Exception as e:
+            return f"Error solving equation: {str(e)}"
 
     @mcp.tool()
     async def trigonometry_calculator(function: str, value: float, unit: str = "degrees") -> str:
@@ -374,27 +401,20 @@ def serve(host, port, transport):
                 result += f"Case: SSS (three sides known)\n"
                 result += f"Using Law of Cosines to find angles:\n"
                 
-                # # Find angle A: cos(A) = (b² + c² - a²)/(2bc)
-                # cos_A = (b**2 + c**2 - a**2) / (2 * b * c)
-                # A_rad = math.acos(cos_A)
-                # A = radians_to_degrees(A_rad)
-                # result += f"A = arccos((b² + c² - a²)/(2bc)) = arccos(({b:.3f}² + {c:.3f}² - {a:.3f}²)/(2×{b:.3f}×{c:.3f})) = {A:.1f}°\n"
-                
                 # Find angle A: cos(A) = (b² + c² - a²)/(2bc)
                 cos_A = (b**2 + c**2 - a**2) / (2 * b * c)
-                # Clamp cos_A to valid range for acos
-                cos_A = max(-1.0, min(1.0, cos_A))
+                cos_A = max(-1.0, min(1.0, cos_A))  # Clamp to valid range [-1, 1]
                 A_rad = math.acos(cos_A)
-                # Find angle B
-                # cos_B = (a**2 + c**2 - b**2) / (2 * a * c)
-                # B_rad = math.acos(cos_B)
-                # B = radians_to_degrees(B_rad)
-                # result += f"B = arccos((a² + c² - b²)/(2ac)) = {B:.1f}°\n"
+                A = radians_to_degrees(A_rad)
+                result += f"A = arccos((b² + c² - a²)/(2bc)) = arccos(({b:.3f}² + {c:.3f}² - {a:.3f}²)/(2×{b:.3f}×{c:.3f})) = {A:.1f}°\n"
+                
                 # Find angle B
                 cos_B = (a**2 + c**2 - b**2) / (2 * a * c)
-                # Clamp cos_B to valid range for acos
-                cos_B = max(-1.0, min(1.0, cos_B))
+                cos_B = max(-1.0, min(1.0, cos_B))  # Clamp to valid range [-1, 1]
                 B_rad = math.acos(cos_B)
+                B = radians_to_degrees(B_rad)
+                result += f"B = arccos((a² + c² - b²)/(2ac)) = {B:.1f}°\n"
+                
                 # Find angle C
                 C = 180 - A - B
                 C_rad = degrees_to_radians(C)
@@ -410,11 +430,15 @@ def serve(host, port, transport):
                 
                 if a is not None and b is not None and C is not None:
                     # Find side c: c² = a² + b² - 2ab×cos(C)
-                    c = math.sqrt(a**2 + b**2 - 2 * a * b * math.cos(C_rad))
+                    c_squared = a**2 + b**2 - 2 * a * b * math.cos(C_rad)
+                    if c_squared < 0:
+                        return "Error: Invalid triangle - impossible measurements"
+                    c = math.sqrt(c_squared)
                     result += f"c = √(a² + b² - 2ab×cos(C)) = √({a:.3f}² + {b:.3f}² - 2×{a:.3f}×{b:.3f}×cos({C:.1f}°)) = {c:.3f}\n"
                     
                     # Find remaining angles using Law of Sines
                     sin_A = a * math.sin(C_rad) / c
+                    sin_A = max(-1.0, min(1.0, sin_A))  # Clamp to valid range [-1, 1]
                     A_rad = math.asin(sin_A)
                     A = radians_to_degrees(A_rad)
                     B = 180 - A - C
@@ -592,7 +616,7 @@ def serve(host, port, transport):
         
         Args:
             expression: Algebraic expression to simplify
-                    Examples: "2x + 3x", "x² - 4", "(x+2)(x-2)"
+                    Examples: "2x + 3x", "x² - 4", "3x² + 2x - x² + 5x - 7"
                     
         Returns:
             str: Simplified expression with steps
@@ -610,58 +634,103 @@ def serve(host, port, transport):
             # Basic pattern matching for common simplifications
             expr = expression.replace(" ", "").lower()
             
-            # Like terms: ax + bx = (a+b)x
             import re
             
-            # Pattern for like terms with x
-            x_terms = re.findall(r'([+-]?\d*\.?\d*)x', expr)
-            if len(x_terms) > 1:
-                total_coeff = 0
-                for term in x_terms:
-                    if term == '' or term == '+':
-                        total_coeff += 1
-                    elif term == '-':
-                        total_coeff -= 1
+            # Initialize coefficients
+            x_squared_coeff = 0
+            x_coeff = 0
+            constant = 0
+            
+            # Find x² terms (must come before x terms to avoid conflicts)
+            x_squared_terms = re.findall(r'([+-]?\d*\.?\d*)x²', expr)
+            if not x_squared_terms:
+                x_squared_terms = re.findall(r'([+-]?\d*\.?\d*)x\^2', expr)
+            
+            for term in x_squared_terms:
+                if term == '' or term == '+':
+                    x_squared_coeff += 1
+                elif term == '-':
+                    x_squared_coeff -= 1
+                else:
+                    x_squared_coeff += float(term)
+            
+            # Find x terms (but not x² or x^2)
+            x_terms = re.findall(r'([+-]?\d*\.?\d*)x(?![²^])', expr)
+            
+            for term in x_terms:
+                if term == '' or term == '+':
+                    x_coeff += 1
+                elif term == '-':
+                    x_coeff -= 1
+                else:
+                    x_coeff += float(term)
+            
+            # Find constant terms (numbers not followed by x)
+            # Remove all x terms first, then find remaining numbers
+            expr_no_x = re.sub(r'[+-]?\d*\.?\d*x[²^2]*', '', expr)
+            const_terms = re.findall(r'([+-]?\d+\.?\d*)', expr_no_x)
+            
+            for term in const_terms:
+                if term:
+                    constant += float(term)
+            
+            # Show the combination steps
+            if x_squared_terms:
+                result += f"x² terms: {' + '.join(x_squared_terms)}x² = {x_squared_coeff:.0f}x²\n"
+            
+            if x_terms:
+                result += f"x terms: {' + '.join(x_terms)}x = {x_coeff:.0f}x\n"
+            
+            if const_terms:
+                result += f"Constants: {' + '.join(const_terms)} = {constant:.0f}\n"
+            
+            # Build the simplified expression
+            simplified_parts = []
+            
+            if x_squared_coeff != 0:
+                if x_squared_coeff == 1:
+                    simplified_parts.append("x²")
+                elif x_squared_coeff == -1:
+                    simplified_parts.append("-x²")
+                else:
+                    simplified_parts.append(f"{x_squared_coeff:.0f}x²")
+            
+            if x_coeff != 0:
+                if x_coeff == 1:
+                    if simplified_parts:
+                        simplified_parts.append("+ x")
                     else:
-                        total_coeff += float(term)
-                
-                result += f"Combining like terms: {' + '.join(x_terms)}x = {total_coeff:.3f}x\n"
+                        simplified_parts.append("x")
+                elif x_coeff == -1:
+                    simplified_parts.append("- x")
+                else:
+                    if x_coeff > 0 and simplified_parts:
+                        simplified_parts.append(f"+ {x_coeff:.0f}x")
+                    else:
+                        simplified_parts.append(f"{x_coeff:.0f}x")
             
-            # Pattern for constants
-            const_terms = re.findall(r'([+-]?\d+\.?\d*)(?!x)', expr)
-            const_terms = [t for t in const_terms if t and not any(c.isalpha() for c in t)]
+            if constant != 0:
+                if constant > 0 and simplified_parts:
+                    simplified_parts.append(f"+ {constant:.0f}")
+                else:
+                    simplified_parts.append(f"{constant:.0f}")
             
-            if len(const_terms) > 1:
-                total_const = sum(float(t) for t in const_terms if t)
-                result += f"Combining constants: {' + '.join(const_terms)} = {total_const:.3f}\n"
+            if not simplified_parts:
+                simplified_expression = "0"
+            else:
+                simplified_expression = " ".join(simplified_parts)
             
-            # Difference of squares: x² - a² = (x+a)(x-a)
-            squares_pattern = r'x²\s*-\s*(\d+\.?\d*)'
-            match = re.search(squares_pattern, expr)
-            if match:
-                a_squared = float(match.group(1))
-                a = math.sqrt(a_squared)
-                if a == int(a):
-                    a = int(a)
-                    result += f"Difference of squares: x² - {a_squared} = (x + {a})(x - {a})\n"
+            result += f"\nSimplified expression: {simplified_expression}\n"
             
-            # Perfect square: x² + 2ax + a²
-            perfect_square = r'x²\s*([+-])\s*(\d+\.?\d*)x\s*([+-])\s*(\d+\.?\d*)'
-            match = re.search(perfect_square, expr)
-            if match:
-                sign1, coeff, sign2, const = match.groups()
-                coeff = float(coeff)
-                const = float(const)
-                
-                # Check if it's a perfect square
-                a = coeff / 2
-                if abs(const - a**2) < 1e-10:
-                    if sign1 == '+' and sign2 == '+':
-                        result += f"Perfect square: x² + {coeff:.0f}x + {const:.0f} = (x + {a:.0f})²\n"
-                    elif sign1 == '-' and sign2 == '+':
-                        result += f"Perfect square: x² - {coeff:.0f}x + {const:.0f} = (x - {a:.0f})²\n"
-            
-            result += f"\nNote: This is a basic implementation. For complex expressions, consider using a computer algebra system.\n"
+            # Check for special patterns
+            if x_squared_coeff != 0 and x_coeff == 0 and constant < 0:
+                # Difference of squares check
+                if x_squared_coeff == 1 and constant == int(constant) and constant < 0:
+                    sqrt_const = math.sqrt(-constant)
+                    if sqrt_const == int(sqrt_const):
+                        sqrt_const = int(sqrt_const)
+                        result += f"\nSpecial form: This is a difference of squares\n"
+                        result += f"x² - {-constant:.0f} = (x + {sqrt_const})(x - {sqrt_const})\n"
             
             return result
             

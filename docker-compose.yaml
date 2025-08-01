@@ -47,6 +47,22 @@ services:
     networks:
       - mcp-network
 
+  # Math MCP Server
+  mcp-math:
+    build:
+      context: .
+      dockerfile: Docker/Dockerfile
+    container_name: physics-assistant-math
+    ports:
+      - "10103:10100"
+    environment:
+      - MCP_SERVICE=math
+      - PYTHONPATH=/app/mcp_tools
+    command: ["uv", "run", "physics-mcp", "--run", "math-server", "--host", "0.0.0.0", "--port", "10100", "--transport", "streamable_http"]
+    restart: unless-stopped
+    networks:
+      - mcp-network
+
 networks:
   mcp-network:
     driver: bridge
