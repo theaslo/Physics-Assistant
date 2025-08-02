@@ -49,16 +49,48 @@ services:
 
   # Math MCP Server
   mcp-math:
+      build:
+        context: .
+        dockerfile: Docker/Dockerfile
+      container_name: physics-assistant-math
+      ports:
+        - "10103:10100"
+      environment:
+        - MCP_SERVICE=math
+        - PYTHONPATH=/app/mcp_tools
+      command: ["uv", "run", "physics-mcp", "--run", "math-server", "--host", "0.0.0.0", "--port", "10100", "--transport", "streamable_http"]
+      restart: unless-stopped
+      networks:
+        - mcp-network
+
+  # Momentum MCP Server
+  mcp-momentum:
     build:
       context: .
       dockerfile: Docker/Dockerfile
-    container_name: physics-assistant-math
+    container_name: physics-assistant-momentum
     ports:
-      - "10103:10100"
+      - "10104:10100"
     environment:
-      - MCP_SERVICE=math
+      - MCP_SERVICE=momentum
       - PYTHONPATH=/app/mcp_tools
-    command: ["uv", "run", "physics-mcp", "--run", "math-server", "--host", "0.0.0.0", "--port", "10100", "--transport", "streamable_http"]
+    command: ["uv", "run", "physics-mcp", "--run", "momentum-server", "--host", "0.0.0.0", "--port", "10100", "--transport", "streamable_http"]
+    restart: unless-stopped
+    networks:
+      - mcp-network
+
+  # Energy MCP Server
+  mcp-energy:
+    build:
+      context: .
+      dockerfile: Docker/Dockerfile
+    container_name: physics-assistant-energy
+    ports:
+      - "10105:10100"
+    environment:
+      - MCP_SERVICE=energy
+      - PYTHONPATH=/app/mcp_tools
+    command: ["uv", "run", "physics-mcp", "--run", "energy-server", "--host", "0.0.0.0", "--port", "10100", "--transport", "streamable_http"]
     restart: unless-stopped
     networks:
       - mcp-network
