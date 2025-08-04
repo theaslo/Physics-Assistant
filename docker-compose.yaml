@@ -95,6 +95,22 @@ services:
     networks:
       - mcp-network
 
+  #Angular Motion MCP Server
+  mcp-energy:
+    build:
+      context: .
+      dockerfile: Docker/Dockerfile
+    container_name: physics-assistant-angular-motion
+    ports:
+      - "10106:10100"
+    environment:
+      - MCP_SERVICE=angular-motion
+      - PYTHONPATH=/app/mcp_tools
+    command: ["uv", "run", "physics-mcp", "--run", "angular-motion-server", "--host", "0.0.0.0", "--port", "10100", "--transport", "streamable_http"]
+    restart: unless-stopped
+    networks:
+      - mcp-network
+
 networks:
   mcp-network:
     driver: bridge

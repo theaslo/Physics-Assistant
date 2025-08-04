@@ -93,7 +93,13 @@ class CombinedPhysicsAgent:
             self.get_user_message = get_user_message  
             self.metadata = get_metadata()
             self.mcp_port = 10105  # MCP port for math agent on VM    
-                
+
+        elif self.agent_id == "angular_motion_agent":
+            from prompts.angular_motion_agent_prompt import get_user_message, get_system_message, get_metadata
+            self.get_system_message = get_system_message
+            self.get_user_message = get_user_message  
+            self.metadata = get_metadata()
+            self.mcp_port = 10106  # MCP port for math agent on VM            
         else:
             raise ValueError(f"Agent type '{self.agent_id}' not supported. Use 'forces_agent', 'kinematics_agent' or 'math_agent'.")
 
@@ -190,6 +196,8 @@ class CombinedPhysicsAgent:
             return await self._solve_momentum_problem_direct(problem)
         elif self.agent_id == "energy_agent":
             return await self._solve_energy_problem_direct(problem)
+        elif self.agent_id == "angular_motion_agent":
+            return await self._solve_angular_motion_problem_direct(problem)
         else:
             return "❌ Unsupported agent type for direct tools"
 
@@ -725,6 +733,7 @@ class CombinedPhysicsAgent:
         return forces
 
     # PARSING METHODS (Mathematics)
+    
     def _parse_equation(self, text: str) -> str:
         """Parse equation from text"""
         # Look for equation patterns
@@ -2287,6 +2296,806 @@ class CombinedPhysicsAgent:
         
         return data
 
+    # ANGULAR MOTION-SPECIFIC DIRECT TOOL METHODS
+
+    async def _solve_angular_motion_problem_direct(self, problem: str) -> str:
+        """Direct tool solving for angular motion problems"""
+        problem_lower = problem.lower()
+        
+        # Angular kinematics calculations
+        if any(word in problem_lower for word in ["angular kinematics", "angular velocity", "angular acceleration", "ω", "α", "θ"]) and any(word in problem_lower for word in ["time", "seconds", "equation"]):
+            return await self._call_angular_kinematics_tool(problem)
+            
+        # Moment of inertia calculations
+        elif any(word in problem_lower for word in ["moment of inertia", "inertia", "i =", "rod", "disk", "sphere", "cylinder", "hoop"]):
+            return await self._call_moment_of_inertia_tool(problem)
+            
+        # Torque calculations
+        elif any(word in problem_lower for word in ["torque", "τ", "force", "radius", "n⋅m", "lever"]) and not any(word in problem_lower for word in ["momentum", "impulse"]):
+            return await self._call_torque_tool(problem)
+            
+        # Angular momentum conservation
+        elif any(word in problem_lower for word in ["angular momentum", "conservation", "figure skater", "spinning", "l =", "iω"]):
+            return await self._call_angular_momentum_conservation_tool(problem)
+            
+        # Rotational energy
+        elif any(word in problem_lower for word in ["rotational energy", "rotational ke", "ke_rot", "spinning energy", "½iω²"]):
+            return await self._call_rotational_energy_tool(problem)
+            
+        # Angular impulse-momentum
+        elif any(word in problem_lower for word in ["angular impulse", "impulse-momentum", "angular impulse-momentum", "∫τ dt"]):
+            return await self._call_angular_impulse_momentum_tool(problem)
+            
+        # Rolling motion
+        elif any(word in problem_lower for word in ["rolling", "rolls", "incline", "sphere race", "yo-yo", "no-slip"]):
+            return await self._call_rolling_motion_tool(problem)
+            
+        else:
+            # Default based on keywords - prioritize by complexity
+            if any(word in problem_lower for word in ["rolling", "incline", "yo-yo"]):
+                return await self._call_rolling_motion_tool(problem)
+            elif any(word in problem_lower for word in ["conservation", "figure skater", "spinning"]):
+                return await self._call_angular_momentum_conservation_tool(problem)
+            elif any(word in problem_lower for word in ["torque", "force", "lever"]):
+                return await self._call_torque_tool(problem)
+            elif any(word in problem_lower for word in ["energy", "ke_rot", "rotational"]):
+                return await self._call_rotational_energy_tool(problem)
+            elif any(word in problem_lower for word in ["moment of inertia", "inertia", "rod", "disk", "sphere"]):
+                return await self._call_moment_of_inertia_tool(problem)
+            elif any(word in problem_lower for word in ["angular", "ω", "α", "kinematics"]):
+                return await self._call_angular_kinematics_tool(problem)
+            else:
+                return await self._call_angular_kinematics_tool(problem)
+
+    async def _call_angular_kinematics_tool(self, problem: str) -> str:
+        """Call angular kinematics tool"""
+        try:
+            if "angular_kinematics" not in self.tool_dict:
+                return "❌ angular_kinematics tool not available"
+            
+            kinematics_data = self._parse_angular_kinematics_data(problem)
+            
+            tool = self.tool_dict["angular_kinematics"]
+            result = await tool.ainvoke({
+                "kinematics_data": json.dumps(kinematics_data)
+            })
+            
+            return f"🎯 **ANGULAR KINEMATICS ANALYSIS**\\n\\n{result}\\n\\n✅ **Analysis completed using MCP tools**"
+            
+        except Exception as e:
+            return f"❌ Error in angular kinematics analysis: {e}"
+
+    async def _call_moment_of_inertia_tool(self, problem: str) -> str:
+        """Call moment of inertia calculation tool"""
+        try:
+            if "calculate_moment_of_inertia" not in self.tool_dict:
+                return "❌ calculate_moment_of_inertia tool not available"
+            
+            object_data = self._parse_moment_of_inertia_data(problem)
+            
+            tool = self.tool_dict["calculate_moment_of_inertia"]
+            result = await tool.ainvoke({
+                "object_data": json.dumps(object_data)
+            })
+            
+            return f"🎯 **MOMENT OF INERTIA CALCULATION**\\n\\n{result}\\n\\n✅ **Calculation completed using MCP tools**"
+            
+        except Exception as e:
+            return f"❌ Error in moment of inertia calculation: {e}"
+
+    async def _call_torque_tool(self, problem: str) -> str:
+        """Call torque calculation tool"""
+        try:
+            if "calculate_torque" not in self.tool_dict:
+                return "❌ calculate_torque tool not available"
+            
+            torque_data = self._parse_torque_data(problem)
+            
+            tool = self.tool_dict["calculate_torque"]
+            result = await tool.ainvoke({
+                "torque_data": json.dumps(torque_data)
+            })
+            
+            return f"🎯 **TORQUE CALCULATION**\\n\\n{result}\\n\\n✅ **Calculation completed using MCP tools**"
+            
+        except Exception as e:
+            return f"❌ Error in torque calculation: {e}"
+
+    async def _call_angular_momentum_conservation_tool(self, problem: str) -> str:
+        """Call angular momentum conservation tool"""
+        try:
+            if "angular_momentum_conservation" not in self.tool_dict:
+                return "❌ angular_momentum_conservation tool not available"
+            
+            momentum_data = self._parse_angular_momentum_data(problem)
+            
+            tool = self.tool_dict["angular_momentum_conservation"]
+            result = await tool.ainvoke({
+                "momentum_data": json.dumps(momentum_data)
+            })
+            
+            return f"🎯 **ANGULAR MOMENTUM CONSERVATION ANALYSIS**\\n\\n{result}\\n\\n✅ **Analysis completed using MCP tools**"
+            
+        except Exception as e:
+            return f"❌ Error in angular momentum conservation analysis: {e}"
+
+    async def _call_rotational_energy_tool(self, problem: str) -> str:
+        """Call rotational energy calculation tool"""
+        try:
+            if "rotational_energy" not in self.tool_dict:
+                return "❌ rotational_energy tool not available"
+            
+            energy_data = self._parse_rotational_energy_data(problem)
+            
+            tool = self.tool_dict["rotational_energy"]
+            result = await tool.ainvoke({
+                "energy_data": json.dumps(energy_data)
+            })
+            
+            return f"🎯 **ROTATIONAL ENERGY ANALYSIS**\\n\\n{result}\\n\\n✅ **Analysis completed using MCP tools**"
+            
+        except Exception as e:
+            return f"❌ Error in rotational energy analysis: {e}"
+
+    async def _call_angular_impulse_momentum_tool(self, problem: str) -> str:
+        """Call angular impulse-momentum tool"""
+        try:
+            if "angular_impulse_momentum" not in self.tool_dict:
+                return "❌ angular_impulse_momentum tool not available"
+            
+            impulse_data = self._parse_angular_impulse_data(problem)
+            
+            tool = self.tool_dict["angular_impulse_momentum"]
+            result = await tool.ainvoke({
+                "impulse_data": json.dumps(impulse_data)
+            })
+            
+            return f"🎯 **ANGULAR IMPULSE-MOMENTUM ANALYSIS**\\n\\n{result}\\n\\n✅ **Analysis completed using MCP tools**"
+            
+        except Exception as e:
+            return f"❌ Error in angular impulse-momentum analysis: {e}"
+
+    async def _call_rolling_motion_tool(self, problem: str) -> str:
+        """Call rolling motion analysis tool"""
+        try:
+            if "rolling_motion_analysis" not in self.tool_dict:
+                return "❌ rolling_motion_analysis tool not available"
+            
+            rolling_data = self._parse_rolling_motion_data(problem)
+            
+            tool = self.tool_dict["rolling_motion_analysis"]
+            result = await tool.ainvoke({
+                "rolling_data": json.dumps(rolling_data)
+            })
+            
+            return f"🎯 **ROLLING MOTION ANALYSIS**\\n\\n{result}\\n\\n✅ **Analysis completed using MCP tools**"
+            
+        except Exception as e:
+            return f"❌ Error in rolling motion analysis: {e}"
+
+    # PARSING METHODS (Angular Motion)
+    def _parse_angular_kinematics_data(self, text: str) -> dict:
+        """Parse angular kinematics parameters"""
+        import re
+        
+        data = {}
+        
+        # Parse angular displacement (theta)
+        theta_patterns = [
+            r'θ[:\s=]+(\d+(?:\.\d+)?)',
+            r'theta[:\s=]+(\d+(?:\.\d+)?)',
+            r'angular displacement[:\s=]+(\d+(?:\.\d+)?)',
+            r'(\d+(?:\.\d+)?)\s*rad(?:ian)?(?:s)?'
+        ]
+        
+        for pattern in theta_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                data["theta"] = float(match.group(1))
+                break
+        
+        # Parse initial angular velocity (omega_0)
+        omega0_patterns = [
+            r'ω₀[:\s=]+(\d+(?:\.\d+)?)',
+            r'omega_0[:\s=]+(\d+(?:\.\d+)?)',
+            r'initial.*?(\d+(?:\.\d+)?)\s*rad/s',
+            r'ω0[:\s=]+(\d+(?:\.\d+)?)'
+        ]
+        
+        for pattern in omega0_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                data["omega_0"] = float(match.group(1))
+                break
+        
+        # Parse final angular velocity (omega_f)
+        omegaf_patterns = [
+            r'ωf[:\s=]+(\d+(?:\.\d+)?)',
+            r'omega_f[:\s=]+(\d+(?:\.\d+)?)',
+            r'final.*?(\d+(?:\.\d+)?)\s*rad/s'
+        ]
+        
+        for pattern in omegaf_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                data["omega_f"] = float(match.group(1))
+                break
+        
+        # Parse angular acceleration (alpha)
+        alpha_patterns = [
+            r'α[:\s=]+(\d+(?:\.\d+)?)',
+            r'alpha[:\s=]+(\d+(?:\.\d+)?)',
+            r'angular acceleration[:\s=]+(\d+(?:\.\d+)?)',
+            r'(\d+(?:\.\d+)?)\s*rad/s²'
+        ]
+        
+        for pattern in alpha_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                data["alpha"] = float(match.group(1))
+                break
+        
+        # Parse time
+        time_patterns = [
+            r'(\d+(?:\.\d+)?)\s*s(?:ec|ond)?(?:s)?',
+            r'time[:\s=]+(\d+(?:\.\d+)?)',
+            r'after\s+(\d+(?:\.\d+)?)\s*s',
+            r't[:\s=]+(\d+(?:\.\d+)?)'
+        ]
+        
+        for pattern in time_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                data["time"] = float(match.group(1))
+                break
+        
+        # Default values if nothing found
+        if not data:
+            data = {"omega_0": 5, "alpha": 2, "time": 3}
+        
+        return data
+
+    def _parse_moment_of_inertia_data(self, text: str) -> dict:
+        """Parse moment of inertia parameters"""
+        import re
+        
+        data = {}
+        
+        # Determine shape
+        if any(word in text.lower() for word in ["rod", "bar", "stick"]):
+            data["shape"] = "rod"
+        elif any(word in text.lower() for word in ["disk", "disc"]):
+            data["shape"] = "disk"
+        elif any(word in text.lower() for word in ["sphere", "ball"]):
+            data["shape"] = "sphere"
+        elif any(word in text.lower() for word in ["cylinder", "tube"]):
+            data["shape"] = "cylinder"
+        elif any(word in text.lower() for word in ["hoop", "ring"]):
+            data["shape"] = "cylinder"
+            data["hollow"] = True
+        else:
+            data["shape"] = "cylinder"  # Default
+        
+        # Parse mass
+        mass_patterns = [
+            r'(\d+(?:\.\d+)?)\s*kg',
+            r'mass[:\s=]+(\d+(?:\.\d+)?)',
+            r'm[:\s=]+(\d+(?:\.\d+)?)'
+        ]
+        
+        for pattern in mass_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                data["mass"] = float(match.group(1))
+                break
+        
+        # Parse dimensions based on shape
+        if data["shape"] == "rod":
+            # Parse length
+            length_patterns = [
+                r'(\d+(?:\.\d+)?)\s*m(?:\s|$|[^/])',
+                r'length[:\s=]+(\d+(?:\.\d+)?)',
+                r'long[:\s,]+(\d+(?:\.\d+)?)',
+                r'L[:\s=]+(\d+(?:\.\d+)?)'
+            ]
+            
+            for pattern in length_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    data["length"] = float(match.group(1))
+                    break
+            
+            # Determine axis
+            if any(word in text.lower() for word in ["center", "middle", "about center"]):
+                data["axis"] = "center"
+            elif any(word in text.lower() for word in ["end", "endpoint", "about end"]):
+                data["axis"] = "end"
+            else:
+                data["axis"] = "center"  # Default
+        
+        else:
+            # Parse radius for other shapes
+            radius_patterns = [
+                r'radius[:\s=]+(\d+(?:\.\d+)?)',
+                r'r[:\s=]+(\d+(?:\.\d+)?)',
+                r'(\d+(?:\.\d+)?)\s*m.*?radius'
+            ]
+            
+            for pattern in radius_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    data["radius"] = float(match.group(1))
+                    break
+        
+        # Determine if hollow
+        if any(word in text.lower() for word in ["hollow", "empty", "thin-walled"]):
+            data["hollow"] = True
+        elif any(word in text.lower() for word in ["solid", "filled"]):
+            data["hollow"] = False
+        
+        # Parse offset for parallel axis theorem
+        offset_patterns = [
+            r'offset[:\s=]+(\d+(?:\.\d+)?)',
+            r'distance.*?(\d+(?:\.\d+)?)\s*m',
+            r'parallel.*?(\d+(?:\.\d+)?)\s*m'
+        ]
+        
+        for pattern in offset_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match and "parallel" in text.lower():
+                data["offset"] = float(match.group(1))
+                break
+        
+        # Default values if nothing found
+        if not data:
+            data = {"shape": "cylinder", "mass": 2, "radius": 0.3}
+        
+        return data
+
+    def _parse_torque_data(self, text: str) -> dict:
+        """Parse torque calculation parameters"""
+        import re
+        
+        data = {}
+        
+        # Parse force
+        force_patterns = [
+            r'(\d+(?:\.\d+)?)\s*N',
+            r'force[:\s=]+(\d+(?:\.\d+)?)',
+            r'F[:\s=]+(\d+(?:\.\d+)?)'
+        ]
+        
+        for pattern in force_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                data["force"] = float(match.group(1))
+                break
+        
+        # Parse radius
+        radius_patterns = [
+            r'(\d+(?:\.\d+)?)\s*m(?:\s|$|[^/])',
+            r'radius[:\s=]+(\d+(?:\.\d+)?)',
+            r'r[:\s=]+(\d+(?:\.\d+)?)',
+            r'at\s+(\d+(?:\.\d+)?)\s*m'
+        ]
+        
+        for pattern in radius_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                data["radius"] = float(match.group(1))
+                break
+        
+        # Parse angle
+        angle_patterns = [
+            r'(\d+(?:\.\d+)?)\s*°',
+            r'(\d+(?:\.\d+)?)\s*degree',
+            r'angle[:\s=]+(\d+(?:\.\d+)?)',
+            r'θ[:\s=]+(\d+(?:\.\d+)?)'
+        ]
+        
+        for pattern in angle_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                data["angle"] = float(match.group(1))
+                break
+        
+        # Default angle based on description
+        if "angle" not in data:
+            if any(word in text.lower() for word in ["perpendicular", "⊥", "90"]):
+                data["angle"] = 90
+            elif any(word in text.lower() for word in ["parallel", "∥", "0"]):
+                data["angle"] = 0
+            else:
+                data["angle"] = 90  # Default perpendicular
+        
+        # Parse moment of inertia and angular acceleration for τ = Iα
+        I_patterns = [
+            r'I[:\s=]+(\d+(?:\.\d+)?)',
+            r'moment of inertia[:\s=]+(\d+(?:\.\d+)?)',
+            r'(\d+(?:\.\d+)?)\s*kg⋅m²'
+        ]
+        
+        for pattern in I_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                data["moment_of_inertia"] = float(match.group(1))
+                break
+        
+        alpha_patterns = [
+            r'α[:\s=]+(\d+(?:\.\d+)?)',
+            r'angular acceleration[:\s=]+(\d+(?:\.\d+)?)',
+            r'(\d+(?:\.\d+)?)\s*rad/s²'
+        ]
+        
+        for pattern in alpha_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                data["angular_acceleration"] = float(match.group(1))
+                break
+        
+        # Default values if nothing found
+        if not data:
+            data = {"force": 50, "radius": 0.3, "angle": 90}
+        
+        return data
+
+    def _parse_angular_momentum_data(self, text: str) -> dict:
+        """Parse angular momentum conservation parameters"""
+        import re
+        
+        data = {}
+        
+        # Figure skater scenario
+        if any(word in text.lower() for word in ["figure skater", "skater", "arms", "tucked", "extended"]):
+            data["figure_skater"] = {}
+            
+            # Parse initial (extended) state
+            I_extended_patterns = [
+                r'I[:\s=]+(\d+(?:\.\d+)?)',
+                r'extended.*?(\d+(?:\.\d+)?)\s*kg⋅m²',
+                r'arms extended.*?(\d+(?:\.\d+)?)'
+            ]
+            
+            for pattern in I_extended_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    data["figure_skater"]["I_extended"] = float(match.group(1))
+                    break
+            
+            # Parse initial angular velocity
+            omega_extended_patterns = [
+                r'ω[:\s=]+(\d+(?:\.\d+)?)',
+                r'(\d+(?:\.\d+)?)\s*rad/s'
+            ]
+            
+            for pattern in omega_extended_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    data["figure_skater"]["omega_extended"] = float(match.group(1))
+                    break
+            
+            # Parse final (tucked) moment of inertia
+            I_tucked_patterns = [
+                r'tucked.*?(\d+(?:\.\d+)?)',
+                r'arms.*?tucked.*?(\d+(?:\.\d+)?)',
+                r'pulls.*?(\d+(?:\.\d+)?)'
+            ]
+            
+            for pattern in I_tucked_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    data["figure_skater"]["I_tucked"] = float(match.group(1))
+                    break
+        
+        # General initial/final states
+        else:
+            # Parse initial state
+            data["initial"] = {}
+            data["final"] = {}
+            
+            # Extract all I and omega values
+            I_matches = re.findall(r'I[:\s=]+(\d+(?:\.\d+)?)', text, re.IGNORECASE)
+            omega_matches = re.findall(r'ω[:\s=]+(\d+(?:\.\d+)?)', text, re.IGNORECASE)
+            
+            if len(I_matches) >= 2:
+                data["initial"]["I"] = float(I_matches[0])
+                data["final"]["I"] = float(I_matches[1])
+            elif len(I_matches) == 1:
+                data["initial"]["I"] = float(I_matches[0])
+            
+            if len(omega_matches) >= 1:
+                data["initial"]["omega"] = float(omega_matches[0])
+            if len(omega_matches) >= 2:
+                data["final"]["omega"] = float(omega_matches[1])
+        
+        # Default values if nothing found
+        if not data:
+            data = {"figure_skater": {"I_extended": 5, "omega_extended": 2, "I_tucked": 1.5}}
+        
+        return data
+
+    def _parse_rotational_energy_data(self, text: str) -> dict:
+        """Parse rotational energy parameters"""
+        import re
+        
+        data = {}
+        
+        # Simple rotational KE
+        if any(word in text.lower() for word in ["ke_rot", "rotational energy", "½iω²"]):
+            # Parse moment of inertia
+            I_patterns = [
+                r'I[:\s=]+(\d+(?:\.\d+)?)',
+                r'moment of inertia[:\s=]+(\d+(?:\.\d+)?)',
+                r'(\d+(?:\.\d+)?)\s*kg⋅m²'
+            ]
+            
+            for pattern in I_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    data["moment_of_inertia"] = float(match.group(1))
+                    break
+            
+            # Parse angular velocity
+            omega_patterns = [
+                r'ω[:\s=]+(\d+(?:\.\d+)?)',
+                r'angular velocity[:\s=]+(\d+(?:\.\d+)?)',
+                r'(\d+(?:\.\d+)?)\s*rad/s'
+            ]
+            
+            for pattern in omega_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    data["angular_velocity"] = float(match.group(1))
+                    break
+        
+        # Rolling object analysis
+        elif any(word in text.lower() for word in ["rolling", "rolls"]):
+            data["rolling_object"] = {}
+            
+            # Parse mass
+            mass_match = re.search(r'(\d+(?:\.\d+)?)\s*kg', text, re.IGNORECASE)
+            if mass_match:
+                data["rolling_object"]["mass"] = float(mass_match.group(1))
+            
+            # Parse radius
+            radius_match = re.search(r'radius[:\s=]+(\d+(?:\.\d+)?)', text, re.IGNORECASE)
+            if radius_match:
+                data["rolling_object"]["radius"] = float(radius_match.group(1))
+            
+            # Parse velocity
+            velocity_match = re.search(r'(\d+(?:\.\d+)?)\s*m/s', text, re.IGNORECASE)
+            if velocity_match:
+                data["rolling_object"]["velocity"] = float(velocity_match.group(1))
+            
+            # Determine shape
+            if any(word in text.lower() for word in ["cylinder", "disk"]):
+                data["rolling_object"]["shape"] = "cylinder"
+            elif any(word in text.lower() for word in ["sphere", "ball"]):
+                data["rolling_object"]["shape"] = "sphere"
+            elif any(word in text.lower() for word in ["hoop", "ring"]):
+                data["rolling_object"]["shape"] = "hoop"
+            else:
+                data["rolling_object"]["shape"] = "cylinder"
+        
+        # Energy transformation
+        elif any(word in text.lower() for word in ["transformation", "initial", "final"]):
+            data["energy_transformation"] = {}
+            
+            # Parse I
+            I_match = re.search(r'I[:\s=]+(\d+(?:\.\d+)?)', text, re.IGNORECASE)
+            if I_match:
+                data["energy_transformation"]["I"] = float(I_match.group(1))
+            
+            # Parse initial and final omega
+            omega_matches = re.findall(r'(\d+(?:\.\d+)?)\s*rad/s', text, re.IGNORECASE)
+            if len(omega_matches) >= 2:
+                data["energy_transformation"]["omega_initial"] = float(omega_matches[0])
+                data["energy_transformation"]["omega_final"] = float(omega_matches[1])
+        
+        # Default values if nothing found
+        if not data:
+            data = {"moment_of_inertia": 2, "angular_velocity": 5}
+        
+        return data
+
+    def _parse_angular_impulse_data(self, text: str) -> dict:
+        """Parse angular impulse parameters"""
+        import re
+        
+        data = {}
+        
+        # Parse torque
+        torque_patterns = [
+            r'τ[:\s=]+(\d+(?:\.\d+)?)',
+            r'torque[:\s=]+(\d+(?:\.\d+)?)',
+            r'(\d+(?:\.\d+)?)\s*N⋅m'
+        ]
+        
+        for pattern in torque_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                data["torque"] = float(match.group(1))
+                break
+        
+        # Parse time
+        time_patterns = [
+            r'(\d+(?:\.\d+)?)\s*s(?:ec|ond)?(?:s)?',
+            r'time[:\s=]+(\d+(?:\.\d+)?)',
+            r'for\s+(\d+(?:\.\d+)?)\s*s'
+        ]
+        
+        for pattern in time_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                data["time"] = float(match.group(1))
+                break
+        
+        # Parse moment of inertia
+        I_patterns = [
+            r'I[:\s=]+(\d+(?:\.\d+)?)',
+            r'moment of inertia[:\s=]+(\d+(?:\.\d+)?)',
+            r'(\d+(?:\.\d+)?)\s*kg⋅m²'
+        ]
+        
+        for pattern in I_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                data["moment_of_inertia"] = float(match.group(1))
+                break
+        
+        # Parse initial angular velocity
+        omega0_patterns = [
+            r'ω₀[:\s=]+(\d+(?:\.\d+)?)',
+            r'initial.*?(\d+(?:\.\d+)?)\s*rad/s',
+            r'ω0[:\s=]+(\d+(?:\.\d+)?)'
+        ]
+        
+        for pattern in omega0_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                data["initial_omega"] = float(match.group(1))
+                break
+        
+        # Default values if nothing found
+        if not data:
+            data = {"torque": 15, "time": 2, "moment_of_inertia": 1.2, "initial_omega": 3}
+        
+        return data
+
+    def _parse_rolling_motion_data(self, text: str) -> dict:
+        """Parse rolling motion parameters"""
+        import re
+        
+        data = {}
+        
+        # Yo-yo scenario
+        if any(word in text.lower() for word in ["yo-yo", "yoyo"]):
+            data["yo_yo"] = {}
+            
+            # Parse mass
+            mass_match = re.search(r'(\d+(?:\.\d+)?)\s*kg', text, re.IGNORECASE)
+            if mass_match:
+                data["yo_yo"]["mass"] = float(mass_match.group(1))
+            else:
+                data["yo_yo"]["mass"] = 0.2
+            
+            # Parse radius
+            radius_match = re.search(r'radius[:\s=]+(\d+(?:\.\d+)?)', text, re.IGNORECASE)
+            if radius_match:
+                data["yo_yo"]["radius"] = float(radius_match.group(1))
+            else:
+                data["yo_yo"]["radius"] = 0.05
+            
+            # Parse string length
+            length_patterns = [
+                r'string.*?(\d+(?:\.\d+)?)\s*m',
+                r'length[:\s=]+(\d+(?:\.\d+)?)',
+                r'(\d+(?:\.\d+)?)\s*m.*?string'
+            ]
+            
+            for pattern in length_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    data["yo_yo"]["string_length"] = float(match.group(1))
+                    break
+            
+            if "string_length" not in data["yo_yo"]:
+                data["yo_yo"]["string_length"] = 1.5
+        
+        # Sphere race scenario
+        elif any(word in text.lower() for word in ["race", "compare", "vs", "versus"]):
+            data["sphere_race"] = {}
+            
+            if any(word in text.lower() for word in ["solid", "hollow"]):
+                data["sphere_race"]["solid_sphere"] = {"mass": 2, "radius": 0.1}
+                data["sphere_race"]["hollow_sphere"] = {"mass": 2, "radius": 0.1}
+        
+        # Single object on incline
+        else:
+            # Determine object type
+            if any(word in text.lower() for word in ["cylinder", "disk"]):
+                data["object"] = "cylinder"
+            elif any(word in text.lower() for word in ["sphere", "ball"]):
+                data["object"] = "sphere"
+            elif any(word in text.lower() for word in ["hoop", "ring"]):
+                data["object"] = "hoop"
+            else:
+                data["object"] = "cylinder"  # Default
+            
+            # Parse mass
+            mass_match = re.search(r'(\d+(?:\.\d+)?)\s*kg', text, re.IGNORECASE)
+            if mass_match:
+                data["mass"] = float(mass_match.group(1))
+            else:
+                data["mass"] = 5
+            
+            # Parse radius
+            radius_match = re.search(r'radius[:\s=]+(\d+(?:\.\d+)?)', text, re.IGNORECASE)
+            if radius_match:
+                data["radius"] = float(radius_match.group(1))
+            else:
+                data["radius"] = 0.3
+            
+            # Parse incline angle
+            angle_patterns = [
+                r'(\d+(?:\.\d+)?)\s*°',
+                r'incline[:\s=]+(\d+(?:\.\d+)?)',
+                r'angle[:\s=]+(\d+(?:\.\d+)?)'
+            ]
+            
+            for pattern in angle_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    data["incline_angle"] = float(match.group(1))
+                    break
+            
+            if "incline_angle" not in data:
+                data["incline_angle"] = 30  # Default
+            
+            # Parse height
+            height_match = re.search(r'height[:\s=]+(\d+(?:\.\d+)?)', text, re.IGNORECASE)
+            if height_match:
+                data["height"] = float(height_match.group(1))
+        
+        return data
+
+# Interactive interface function to add:
+
+async def interactive_angular_motion_agent():
+    """Interactive angular motion agent interface"""
+    agent = create_angular_motion_agent(use_direct_tools=True)  # Use working mode
+    
+    await agent.initialize()
+    agent.get_user_message()
+    
+    while True:
+        try:
+            user_input = input(f"🌀 Angular Motion Problem: ").strip()
+            
+            if user_input.lower() in ['quit', 'exit', 'q', 'bye']:
+                print(f"👋 Goodbye from Angular Motion Agent!")
+                break
+                
+            if not user_input:
+                continue
+                
+            print("\\n🤖 Analyzing and solving...")
+            result = await agent.solve_problem(user_input)
+            
+            if result["success"]:
+                print("📊 SOLUTION:")
+                print(result["solution"])
+            else:
+                print(f"❌ ERROR: {result['error']}")
+                
+            print("\\n" + "-"*70 + "\\n")
+            
+        except KeyboardInterrupt:
+            print(f"\\n👋 Goodbye from Angular Motion Agent!")
+            break
+        except Exception as e:
+            print(f"❌ Error: {e}\\n")
+
 # Interactive interface function to add:
 
 async def interactive_energy_agent():
@@ -2379,6 +3188,13 @@ def create_energy_agent(use_direct_tools: bool = True) -> CombinedPhysicsAgent:
         use_direct_tools=use_direct_tools
     )
 
+def create_angular_motion_agent(use_direct_tools: bool = True) -> CombinedPhysicsAgent:
+    """Create an angular motion agent"""
+    return CombinedPhysicsAgent(
+        agent_id="angular_motion_agent", 
+        use_direct_tools=use_direct_tools
+    )
+
 # INTERACTIVE INTERFACES
 async def interactive_physics_agent(agent_type: str = "forces"):
     """Universal interactive interface"""
@@ -2392,8 +3208,10 @@ async def interactive_physics_agent(agent_type: str = "forces"):
         agent = create_momentum_agent(use_direct_tools=True)  # Use working mode 
     elif agent_type == "energy":
         agent = create_energy_agent(use_direct_tools=True)  # Use working mode   
+    elif agent_type == "angular motion":
+        agent = create_angular_motion_agent(use_direct_tools=True)  # Use working mode   
     else:
-        raise ValueError("Agent type must be 'forces', 'kinematics', 'math', 'momentum' or 'energy' ")
+        raise ValueError("Agent type must be 'forces', 'kinematics', 'math', 'momentum', 'energy' or 'angular motion' ")
         
     await agent.initialize()
     agent.get_user_message()
@@ -2441,4 +3259,7 @@ if __name__ == "__main__":
     #asyncio.run(interactive_physics_agent("momentum"))
 
     # Uncomment to run math agent
-    asyncio.run(interactive_physics_agent("energy"))
+    #asyncio.run(interactive_physics_agent("energy"))
+
+    # Uncomment to run math agent
+    asyncio.run(interactive_physics_agent("angular motion"))

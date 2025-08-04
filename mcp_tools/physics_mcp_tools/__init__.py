@@ -40,6 +40,9 @@ def main(command, host, port, transport) -> None:
     elif command == 'energy-server':
         from physics_mcp_tools.energy_mcp_server import serve
         serve(host, port, transport)
+    elif command == 'angular-motion-server':
+        from physics_mcp_tools.angular_motion_mcp_server import serve
+        serve(host, port, transport)
     elif command == 'circuit-server':
         from physics_mcp_tools.circuit_mcp_server import serve
         serve(host, port, transport)
