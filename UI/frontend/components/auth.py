@@ -30,6 +30,21 @@ class AuthManager:
                     'role': 'student',
                     'course': 'PHYS101'
                 },
+                # Add your students here:
+                'alice_smith': {
+                    'name': 'Alice Smith',
+                    'password': self._hash_password('physics2024'),
+                    'email': 'alice.smith@university.edu', 
+                    'role': 'student',
+                    'course': 'PHYS101'
+                },
+                'bob_jones': {
+                    'name': 'Bob Jones',
+                    'password': self._hash_password('physics2024'),
+                    'email': 'bob.jones@university.edu',
+                    'role': 'student', 
+                    'course': 'PHYS101'
+                },
                 'instructor': {
                     'name': 'Dr. Physics',
                     'password': self._hash_password('instructor123'),

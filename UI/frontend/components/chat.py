@@ -11,26 +11,9 @@ class ChatInterface:
         self.agent_id = agent_id
         self.api_client = PhysicsAPIClient()
         self.agent_info = self.api_client.get_agent_info(agent_id)
-        
-        
-        # Initialize agent on first use
-        self._ensure_agent_ready()
-    
-    def _ensure_agent_ready(self):
-        """Ensure the agent is created and ready"""
-        if not st.session_state.get(f'agent_{self.agent_id}_ready', False):
-            if self.api_client.is_connected():
-                with st.spinner(f"Initializing {self.agent_info.get('name', 'Physics Agent')}..."):
-                    result = self.api_client.create_agent(self.agent_id)
-                    if result.get('success', False):
-                        st.session_state[f'agent_{self.agent_id}_ready'] = True
-                    else:
-                        st.error(f"Failed to initialize agent: {result.get('error', 'Unknown error')}")
-            else:
-                st.warning("⚠️ API server not connected. Please check the FastAPI server is running.")
     
     def render(self):
-        """Render the complete chat interface"""
+        """Render the complete chat interface"""        
         # Chat header
         self._render_chat_header()
         
@@ -289,9 +272,10 @@ class ChatInterface:
         
         st.session_state[chat_history_key].append(user_message)
         
-        # Get response from MCP server (placeholder for now)
+        # Get response from agent
         with st.spinner("Thinking..."):
             response = self._get_agent_response(user_input)
+        
         
         # Add agent response to chat history
         agent_message = {
@@ -304,7 +288,8 @@ class ChatInterface:
         chat_history_key = f'chat_history_{self.agent_id}'
         st.session_state[chat_history_key].append(agent_message)
         
-        # Chat updates automatically in Streamlit
+        # Force UI to update to show the new message
+        st.rerun()
     
     def _handle_image_upload(self, uploaded_file):
         """Process uploaded image"""
@@ -366,16 +351,14 @@ class ChatInterface:
     def _get_agent_response(self, user_input: str) -> str:
         """Get response from FastAPI server using the agent"""
         try:
-            
             # Check if API is connected
             if not self.api_client.is_connected():
                 return "⚠️ Sorry, I'm unable to connect to the physics assistant server. Please ensure the FastAPI server is running and try again."
             
-            # Check if agent is ready
-            if not st.session_state.get(f'agent_{self.agent_id}_ready', False):
-                self._ensure_agent_ready()
-                if not st.session_state.get(f'agent_{self.agent_id}_ready', False):
-                    return "❌ Sorry, I'm having trouble initializing the physics agent. Please try again."
+            # Always ensure agent exists - the API handles duplicate creation gracefully
+            result = self.api_client.create_agent(self.agent_id)
+            if not result.get('success', False):
+                return f"❌ Failed to initialize agent: {result.get('error', 'Unknown error')}"
             
             # Send message to agent via API
             response = self.api_client.send_message(
@@ -389,7 +372,6 @@ class ChatInterface:
                 content = response.get('solution', response.get('content', 'Solution generated'))
                 
                 # Add metadata information if available
-                metadata = response.get('metadata', {})
                 tools_used = response.get('tools_used', [])
                 reasoning = response.get('reasoning', '')
                 

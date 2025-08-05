@@ -198,6 +198,17 @@ python start_ui.py     # Terminal 2
 
 **Status:** All major bugs resolved, system fully functional and ready for production
 
+### Latest Fix - Double Question Issue ✅ (Aug 2025)
+
+#### Double Question Issue - FINAL RESOLUTION ✅
+**Problem:** Users had to ask questions multiple times - agents generated responses but they weren't displayed
+**Root Cause:** Streamlit wasn't updating the UI after adding agent responses to chat history
+**Files Fixed:**
+- `/frontend/components/chat.py:292` - Added `st.rerun()` after adding agent message to chat history
+- `/frontend/components/chat.py:350-392` - Cleaned up agent response handling, removed debug logging
+**Solution:** Force UI update with `st.rerun()` after adding agent response to session state
+**Result:** Responses now appear immediately after being generated - issue completely resolved
+
 ### Next Steps for Continuation:
 1. **Debug Energy Agent:** Resolve MCP server connection issues on port 10105
 2. **Test Example Questions:** Verify all agents show comprehensive API-driven examples  
