@@ -16,8 +16,7 @@ def initialize_session_state():
         st.session_state['user_info'] = {}
     if 'selected_agent' not in st.session_state:
         st.session_state['selected_agent'] = None
-    if 'chat_history' not in st.session_state:
-        st.session_state['chat_history'] = []
+    # Agent-specific chat histories are initialized as needed
     if 'session_data' not in st.session_state:
         st.session_state['session_data'] = {}
 
@@ -64,7 +63,6 @@ def render_main_interface(session_manager):
         
         if selected_agent != st.session_state['selected_agent']:
             st.session_state['selected_agent'] = selected_agent
-            st.rerun()
         
         # Physics constants reference
         with st.expander("📋 Physics Constants"):
@@ -73,8 +71,15 @@ def render_main_interface(session_manager):
         
         # Session statistics
         with st.expander("📊 Session Stats"):
-            st.metric("Messages", len(st.session_state['chat_history']))
-            st.metric("Agent", st.session_state['selected_agent'] or "None")
+            # Count messages for current agent
+            selected_agent = st.session_state.get('selected_agent')
+            if selected_agent:
+                chat_history_key = f'chat_history_{selected_agent}'
+                message_count = len(st.session_state.get(chat_history_key, []))
+            else:
+                message_count = 0
+            st.metric("Messages", message_count)
+            st.metric("Agent", selected_agent or "None")
         
         # Logout button
         if st.button("🚪 Logout"):
@@ -82,10 +87,16 @@ def render_main_interface(session_manager):
             st.session_state['authentication_status'] = None
             st.rerun()
     
-    # Main chat interface
-    if st.session_state['selected_agent']:
-        chat_interface = ChatInterface(st.session_state['selected_agent'])
-        chat_interface.render()
+    # Main chat interface  
+    current_agent = st.session_state.get('selected_agent')
+    
+    if current_agent:
+        try:
+            chat_interface = ChatInterface(current_agent)
+            chat_interface.render()  
+        except Exception as e:
+            st.error(f"❌ ERROR creating ChatInterface: {str(e)}")
+            st.exception(e)
     else:
         st.info("👈 Please select a physics agent from the sidebar to start chatting!")
         
@@ -93,7 +104,10 @@ def render_main_interface(session_manager):
         st.subheader("Available Physics Agents")
         cols = st.columns(2)
         
-        for i, (agent_id, agent_info) in enumerate(Config.PHYSICS_AGENTS.items()):
+        # Get agents from AgentManager instead of Config
+        available_agents = agent_manager.get_all_agents()
+        
+        for i, (agent_id, agent_info) in enumerate(available_agents.items()):
             with cols[i % 2]:
                 st.markdown(f"""
                 **{agent_info['icon']} {agent_info['name']}**  

@@ -24,8 +24,8 @@ class AgentCreateRequest(BaseModel):
     """Request model for creating a physics agent"""
     agent_id: str = Field(
         ..., 
-        description="Agent type: 'forces_agent' or 'kinematics_agent'",
-        pattern="^(forces_agent|kinematics_agent)$"
+        description="Agent type: forces_agent, kinematics_agent, math_agent, momentum_agent, energy_agent, or angular_motion_agent",
+        pattern="^(forces_agent|kinematics_agent|math_agent|momentum_agent|energy_agent|angular_motion_agent)$"
     )
     use_direct_tools: bool = Field(
         default=True, 
@@ -118,7 +118,7 @@ async def root():
         "message": "Physics Assistant API",
         "version": "1.0.0",
         "docs_url": "/docs",
-        "available_agents": ["forces_agent", "kinematics_agent"]
+        "available_agents": ["forces_agent", "kinematics_agent", "math_agent", "momentum_agent", "energy_agent", "angular_motion_agent"]
     }
 
 @app.post("/agent/create", response_model=AgentCreateResponse)
@@ -137,18 +137,8 @@ async def create_agent(request: AgentCreateRequest) -> AgentCreateResponse:
     try:
         logger.info(f"Creating agent: {request.agent_id}")
         
-        # Create agent using the required pattern
-        agent = CombinedPhysicsAgent(
-            agent_id=request.agent_id,
-            use_direct_tools=request.use_direct_tools
-        )
-        
-        # Initialize the agent
-        await agent.initialize()
-        
-        # Store in agent store
-        agent_key = f"{request.agent_id}_{request.use_direct_tools}"
-        agent_store[agent_key] = agent
+        # Get or create agent using the existing function
+        agent = await get_or_create_agent(request.agent_id, request.use_direct_tools)
         
         # Get capabilities
         capabilities = await agent.get_capabilities()
@@ -178,10 +168,11 @@ async def solve_problem(
     """
     try:
         # Validate agent_id
-        if agent_id not in ["forces_agent", "kinematics_agent"]:
+        valid_agents = ["forces_agent", "kinematics_agent", "math_agent", "momentum_agent", "energy_agent", "angular_motion_agent"]
+        if agent_id not in valid_agents:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid agent_id: {agent_id}. Must be 'forces_agent' or 'kinematics_agent'"
+                detail=f"Invalid agent_id: {agent_id}. Must be one of: {', '.join(valid_agents)}"
             )
         
         # Get or create agent
@@ -215,10 +206,11 @@ async def check_agent_health(
     """
     try:
         # Validate agent_id
-        if agent_id not in ["forces_agent", "kinematics_agent"]:
+        valid_agents = ["forces_agent", "kinematics_agent", "math_agent", "momentum_agent", "energy_agent", "angular_motion_agent"]
+        if agent_id not in valid_agents:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid agent_id: {agent_id}"
+                detail=f"Invalid agent_id: {agent_id}. Must be one of: {', '.join(valid_agents)}"
             )
         
         # Get or create agent
@@ -246,10 +238,11 @@ async def get_agent_capabilities(
     """
     try:
         # Validate agent_id
-        if agent_id not in ["forces_agent", "kinematics_agent"]:
+        valid_agents = ["forces_agent", "kinematics_agent", "math_agent", "momentum_agent", "energy_agent", "angular_motion_agent"]
+        if agent_id not in valid_agents:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid agent_id: {agent_id}"
+                detail=f"Invalid agent_id: {agent_id}. Must be one of: {', '.join(valid_agents)}"
             )
         
         # Get or create agent
@@ -283,10 +276,36 @@ async def list_available_agents():
                 "agent_id": "kinematics_agent", 
                 "name": "Kinematics Agent",
                 "description": "Handles motion analysis, projectile motion, and kinematics equations"
+            },
+            {
+                "agent_id": "math_agent",
+                "name": "Math Agent", 
+                "description": "Handles mathematical calculations, algebra, and computational problems"
+            },
+            {
+                "agent_id": "momentum_agent",
+                "name": "Momentum Agent",
+                "description": "Handles momentum, impulse, and collision problems"
+            },
+            {
+                "agent_id": "energy_agent",
+                "name": "Energy Agent",
+                "description": "Handles work, energy, power, and conservation of energy problems"
+            },
+            {
+                "agent_id": "angular_motion_agent",
+                "name": "Angular Motion Agent",
+                "description": "Handles rotational motion, angular momentum, and torque problems"
             }
         ],
         "active_agents": list(agent_store.keys())
     }
+# @app.get("/agents/list")
+# async def list_available_agents():
+#     return {
+#         "available_agents": list(Config.PHYSICS_AGENTS.values()),
+#         "active_agents": list(agent_store.keys())
+#     }
 
 @app.delete("/agent/{agent_id}")
 async def remove_agent(agent_id: str, use_direct_tools: bool = True):

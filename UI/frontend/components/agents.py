@@ -35,6 +35,26 @@ class AgentManager:
                         'name': 'Kinematics Agent',
                         'icon': '🚀',
                         'description': 'Expert in motion analysis, projectile motion, and kinematics equations'
+                    },
+                    'math_agent': {
+                        'name': 'Math Agent',
+                        'icon': '🔢',
+                        'description': 'Expert in mathematical calculations, algebra, and computational problems'
+                    },
+                    'momentum_agent': {
+                        'name': 'Momentum Agent',
+                        'icon': '💥',
+                        'description': 'Specialized in momentum, impulse, and collision analysis'
+                    },
+                    'energy_agent': {
+                        'name': 'Energy Agent',
+                        'icon': '⚡',
+                        'description': 'Expert in work, energy, power, and conservation principles'
+                    },
+                    'angular_motion_agent': {
+                        'name': 'Angular Motion Agent',
+                        'icon': '🌀',
+                        'description': 'Specialized in rotational motion, angular momentum, and torque'
                     }
                 }
         except Exception as e:
@@ -58,23 +78,18 @@ class AgentManager:
         agent_options.insert(0, "🚫 No Agent Selected")
         agent_mapping["🚫 No Agent Selected"] = None
         
-        # Get current selection
-        current_agent = st.session_state.get('selected_agent')
-        current_index = 0
-        
-        if current_agent:
-            for i, (display_name, agent_id) in enumerate(agent_mapping.items()):
-                if agent_id == current_agent:
-                    current_index = i
-                    break
-        
-        # Render selectbox
+        # Use the selectbox with proper state management
+        # Let the selectbox key handle the state, don't interfere with index
+        if "agent_selector" not in st.session_state:
+            st.session_state["agent_selector"] = "🚫 No Agent Selected"
+            
         selected_display = st.selectbox(
             "Choose Agent:",
             agent_options,
-            index=current_index,
-            label_visibility="collapsed"
+            label_visibility="collapsed",
+            key="agent_selector"
         )
+        
         
         selected_agent = agent_mapping[selected_display]
         
@@ -140,7 +155,7 @@ class AgentManager:
                 "Inclined plane analysis",
                 "Tension and normal force calculations"
             ],
-            "energy": [
+            "energy_agent": [
                 "Work calculations (W = F·d)",
                 "Kinetic and potential energy",
                 "Conservation of mechanical energy",
@@ -148,7 +163,7 @@ class AgentManager:
                 "Power calculations (P = W/t)",
                 "Energy efficiency problems"
             ],
-            "momentum": [
+            "momentum_agent": [
                 "Linear momentum calculations (p = mv)",
                 "Conservation of momentum",
                 "Collision analysis (elastic and inelastic)",
@@ -156,7 +171,7 @@ class AgentManager:
                 "Center of mass problems",
                 "Explosion and recoil problems"
             ],
-            "rotation": [
+            "angular_motion_agent": [
                 "Angular position, velocity, acceleration",
                 "Rotational kinematics equations",
                 "Moment of inertia calculations",
@@ -164,7 +179,7 @@ class AgentManager:
                 "Rotational energy and angular momentum",
                 "Rolling motion problems"
             ],
-            "math_helper": [
+            "math_agent": [
                 "Trigonometric functions and identities",
                 "Vector operations and decomposition",
                 "Algebraic equation solving",

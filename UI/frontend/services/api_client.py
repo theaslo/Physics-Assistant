@@ -44,7 +44,7 @@ class PhysicsAPIClient:
         Create and initialize a physics agent
         
         Args:
-            agent_id: Agent type ('forces_agent' or 'kinematics_agent')
+            agent_id: Agent type (forces_agent, kinematics_agent, math_agent, momentum_agent, energy_agent, angular_motion_agent)
             use_direct_tools: Whether to use direct MCP tools
             
         Returns:
@@ -88,7 +88,7 @@ class PhysicsAPIClient:
         Solve a physics problem using the specified agent
         
         Args:
-            agent_id: Agent type ('forces_agent' or 'kinematics_agent')
+            agent_id: Agent type (forces_agent, kinematics_agent, math_agent, momentum_agent, energy_agent, angular_motion_agent)
             problem: Problem description
             context: Optional context for the problem
             use_direct_tools: Whether to use direct MCP tools
@@ -231,6 +231,26 @@ class PhysicsAPIClient:
                             'agent_id': 'kinematics_agent',
                             'name': 'Kinematics Agent', 
                             'description': 'Handles motion analysis, projectile motion, and kinematics equations'
+                        },
+                        {
+                            'agent_id': 'math_agent',
+                            'name': 'Math Agent',
+                            'description': 'Handles mathematical calculations, algebra, and computational problems'
+                        },
+                        {
+                            'agent_id': 'momentum_agent',
+                            'name': 'Momentum Agent',
+                            'description': 'Handles momentum, impulse, and collision problems'
+                        },
+                        {
+                            'agent_id': 'energy_agent',
+                            'name': 'Energy Agent',
+                            'description': 'Handles work, energy, power, and conservation of energy problems'
+                        },
+                        {
+                            'agent_id': 'angular_motion_agent',
+                            'name': 'Angular Motion Agent',
+                            'description': 'Handles rotational motion, angular momentum, and torque problems'
                         }
                     ],
                     'active_agents': []
@@ -320,32 +340,33 @@ class PhysicsAPIClient:
             Dict containing agent response
         """
         # Get conversation context
-        context = self._get_conversation_context()
+        context = self._get_conversation_context(agent_id)
         
         # Solve the problem using the agent
         result = self.solve_problem(agent_id, message, context)
         
-        # Format response for chat interface
+        # Return the API response directly, just add status for compatibility
         if result.get('success'):
-            return {
-                'status': 'success',
-                'content': result.get('solution', 'Solution generated successfully'),
-                'agent_id': agent_id,
-                'metadata': result.get('metadata', {}),
-                'tools_used': result.get('tools_used', []),
-                'reasoning': result.get('reasoning', '')
-            }
+            # Return the full API response with additional status field
+            result['status'] = 'success'
+            return result
         else:
             return {
+                'success': False,
                 'status': 'error',
                 'content': f"Sorry, I encountered an error: {result.get('error', 'Unknown error')}",
                 'agent_id': agent_id,
                 'error': result.get('error')
             }
     
-    def _get_conversation_context(self) -> Optional[Dict[str, Any]]:
+    def _get_conversation_context(self, agent_id: str = None) -> Optional[Dict[str, Any]]:
         """Get recent conversation context for the agent"""
-        chat_history = st.session_state.get('chat_history', [])
+        # Use agent-specific chat history if agent_id provided
+        if agent_id:
+            chat_history_key = f'chat_history_{agent_id}'
+            chat_history = st.session_state.get(chat_history_key, [])
+        else:
+            chat_history = st.session_state.get('chat_history', [])
         
         if not chat_history:
             return None
@@ -398,6 +419,54 @@ class PhysicsAPIClient:
                     'Constant acceleration problems',
                     'Uniform motion analysis',
                     'Relative motion problems'
+                ]
+            },
+            'math_agent': {
+                'name': 'Math Agent',
+                'icon': '🔢',
+                'description': 'Expert in mathematical calculations, algebra, and computational problems',
+                'capabilities': [
+                    'Algebraic equation solving',
+                    'Calculus operations',
+                    'Numerical computations',
+                    'Mathematical modeling',
+                    'Statistical analysis'
+                ]
+            },
+            'momentum_agent': {
+                'name': 'Momentum Agent',
+                'icon': '💥',
+                'description': 'Specialized in momentum, impulse, and collision analysis',
+                'capabilities': [
+                    'Momentum conservation problems',
+                    'Impulse-momentum theorem',
+                    'Elastic and inelastic collisions',
+                    'Center of mass calculations',
+                    'Explosion and recoil problems'
+                ]
+            },
+            'energy_agent': {
+                'name': 'Energy Agent',
+                'icon': '⚡',
+                'description': 'Expert in work, energy, power, and conservation principles',
+                'capabilities': [
+                    'Work-energy theorem applications',
+                    'Kinetic and potential energy',
+                    'Conservation of energy problems',
+                    'Power calculations',
+                    'Energy transformation analysis'
+                ]
+            },
+            'angular_motion_agent': {
+                'name': 'Angular Motion Agent',
+                'icon': '🌀',
+                'description': 'Specialized in rotational motion, angular momentum, and torque',
+                'capabilities': [
+                    'Rotational kinematics',
+                    'Torque and angular acceleration',
+                    'Angular momentum conservation',
+                    'Moment of inertia calculations',
+                    'Rolling motion problems'
                 ]
             }
         }
