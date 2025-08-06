@@ -612,24 +612,29 @@ def serve(host, port, transport):
     @mcp.tool()
     async def algebra_simplify(expression: str) -> str:
         """
-        Simplify algebraic expressions (basic implementation).
+        Simplify algebraic expressions and handle basic equation solving.
         
         Args:
-            expression: Algebraic expression to simplify
+            expression: Algebraic expression or equation to simplify
                     Examples: "2x + 3x", "x² - 4", "3x² + 2x - x² + 5x - 7"
+                    Equations: "K = 1/2 * m * v^2", "solve v from K = 1/2 * m * v^2"
                     
         Returns:
-            str: Simplified expression with steps
+            str: Simplified expression with steps or equation solutions
         """
         try:
+            # Check if it's a solve request
+            if "solve" in expression.lower():
+                return await self._handle_solve_request(expression)
+            
             result = f"""
-    Algebra Simplification:
-    ======================
+🎯 ALGEBRA SIMPLIFICATION
 
-    Original expression: {expression}
+Original expression: {expression}
 
-    Simplification steps:
-    """
+Simplification steps:
+====================
+"""
             
             # Basic pattern matching for common simplifications
             expr = expression.replace(" ", "").lower()
@@ -720,7 +725,7 @@ def serve(host, port, transport):
             else:
                 simplified_expression = " ".join(simplified_parts)
             
-            result += f"\nSimplified expression: {simplified_expression}\n"
+            result += f"\n✅ Simplified expression: {simplified_expression}\n"
             
             # Check for special patterns
             if x_squared_coeff != 0 and x_coeff == 0 and constant < 0:
@@ -729,13 +734,52 @@ def serve(host, port, transport):
                     sqrt_const = math.sqrt(-constant)
                     if sqrt_const == int(sqrt_const):
                         sqrt_const = int(sqrt_const)
-                        result += f"\nSpecial form: This is a difference of squares\n"
+                        result += f"\n🔍 Special form: This is a difference of squares\n"
                         result += f"x² - {-constant:.0f} = (x + {sqrt_const})(x - {sqrt_const})\n"
             
             return result
             
         except Exception as e:
             return f"Error simplifying expression: {str(e)}"
+
+    async def _handle_solve_request(self, expression: str) -> str:
+        """
+        Handle solve requests from within algebra_simplify.
+        """
+        try:
+            import re
+            
+            # Parse solve requests like "solve v from K = 1/2 * m * v^2"
+            solve_pattern = r'solve\s+(\w+)\s+from\s+(.+)'
+            match = re.search(solve_pattern, expression, re.IGNORECASE)
+            
+            if match:
+                variable = match.group(1)
+                equation = match.group(2)
+                
+                # Use the solve_for_variable function
+                return await solve_for_variable(equation, variable)
+            
+            # Handle other solve formats
+            if "=" in expression:
+                # If it's just an equation, provide general guidance
+                return f"""
+🎯 EQUATION DETECTED
+
+Expression: {expression}
+
+To solve this equation:
+1. Identify the variable you want to solve for
+2. Use algebraic manipulation to isolate that variable
+3. Apply inverse operations systematically
+
+💡 Use solve_for_variable tool with specific variable name for detailed steps
+"""
+            
+            return f"Could not parse solve request: {expression}"
+            
+        except Exception as e:
+            return f"Error handling solve request: {str(e)}"
 
     @mcp.tool()
     async def unit_circle_reference(angle: float, unit: str = "degrees") -> str:
@@ -942,7 +986,352 @@ def serve(host, port, transport):
             
         except Exception as e:
             return f"Error in statistical calculation: {str(e)}"
+    @mcp.tool()
+    async def solve_for_variable(equation: str, solve_for: str) -> str:
+        """
+        Solve algebraic equations for a specified variable.
+        
+        Args:
+            equation: Equation to solve (e.g., "K = 1/2 * m * v^2", "F = m * a")
+            solve_for: Variable to solve for (e.g., "v", "m", "a")
+            
+        Returns:
+            str: Step-by-step solution showing algebraic manipulation
+        """
+        try:
+            result = f"""
+🎯 ALGEBRAIC EQUATION SOLVER
 
+Original equation: {equation}
+Solving for: {solve_for}
+
+Solution Process:
+================
+"""
+            
+            # Clean and parse equation
+            eq = equation.replace(" ", "").lower()
+            target_var = solve_for.lower()
+            
+            # More flexible pattern matching for kinetic energy equation
+            if any(pattern in eq for pattern in ["k=1/2*m*v^2", "k=(1/2)*m*v^2", "k=0.5*m*v^2", "k=1/2mv^2", "k=(1/2)mv^2"]):
+                if target_var == "v":
+                    result += f"""
+Step 1: Start with kinetic energy equation
+K = ½mv²
+
+Step 2: Multiply both sides by 2
+2K = mv²
+
+Step 3: Divide both sides by m
+2K/m = v²
+
+Step 4: Take square root of both sides
+v = ±√(2K/m)
+
+✅ FINAL ANSWER: v = ±√(2K/m)
+
+Physical Interpretation:
+• The ± indicates velocity can be in either direction
+• For speed (magnitude only), use: |v| = √(2K/m)  
+• Units: If K is in Joules and m in kg, then v is in m/s
+"""
+                elif target_var == "m":
+                    result += f"""
+Step 1: Start with kinetic energy equation
+K = ½mv²
+
+Step 2: Multiply both sides by 2
+2K = mv²
+
+Step 3: Divide both sides by v²
+m = 2K/v²
+
+✅ FINAL ANSWER: m = 2K/v²
+"""
+                elif target_var == "k":
+                    result += f"""
+The equation is already solved for K:
+K = ½mv²
+
+✅ FINAL ANSWER: K = ½mv²
+
+This gives kinetic energy in terms of mass and velocity.
+"""
+                    
+            elif "f=m*a" in eq or "f=ma" in eq:
+                if target_var == "a":
+                    result += """
+    Step 1: Start with Newton's Second Law
+    F = ma
+
+    Step 2: Divide both sides by m
+    a = F/m
+
+    Final Answer: a = F/m
+    """
+                elif target_var == "m":
+                    result += """
+    Step 1: Start with Newton's Second Law
+    F = ma
+
+    Step 2: Divide both sides by a
+    m = F/a
+
+    Final Answer: m = F/a
+    """
+                elif target_var == "f":
+                    result += """
+    The equation is already solved for F:
+    F = ma
+
+    This is Newton's Second Law.
+    """
+                    
+            elif "p=m*v" in eq or "p=mv" in eq:
+                if target_var == "v":
+                    result += """
+    Step 1: Start with momentum equation
+    p = mv
+
+    Step 2: Divide both sides by m
+    v = p/m
+
+    Final Answer: v = p/m
+    """
+                elif target_var == "m":
+                    result += """
+    Step 1: Start with momentum equation
+    p = mv
+
+    Step 2: Divide both sides by v
+    m = p/v
+
+    Final Answer: m = p/v
+    """
+                    
+            elif "e=m*c^2" in eq or "e=mc^2" in eq:
+                if target_var == "m":
+                    result += """
+    Step 1: Start with mass-energy equivalence
+    E = mc²
+
+    Step 2: Divide both sides by c²
+    m = E/c²
+
+    Final Answer: m = E/c²
+    """
+                elif target_var == "e":
+                    result += """
+    The equation is already solved for E:
+    E = mc²
+
+    This is Einstein's mass-energy equivalence.
+    """
+                    
+            # Handle generic quadratic patterns  
+            elif "=" in eq and ("^2" in eq or "²" in eq):
+                parts = eq.split("=")
+                if len(parts) == 2:
+                    left, right = parts
+                    if target_var + "^2" in left or target_var + "²" in left:
+                        result += f"""
+Step 1: Identify that {target_var} appears squared
+{equation}
+
+Step 2: Isolate {target_var}² term
+{target_var}² = {right}
+
+Step 3: Take square root of both sides
+{target_var} = ±√({right})
+
+✅ FINAL ANSWER: {target_var} = ±√({right})
+"""
+                    elif target_var + "^2" in right or target_var + "²" in right:
+                        result += f"""
+Step 1: Identify that {target_var} appears squared
+{equation}
+
+Step 2: Take square root of both sides
+√({left}) = |{target_var}|
+
+✅ FINAL ANSWER: {target_var} = ±√({left})
+"""
+            
+            # Handle more generic algebraic manipulation
+            elif "=" in eq:
+                parts = eq.split("=")
+                if len(parts) == 2:
+                    left, right = parts
+                    
+                    # Check if target variable appears on one side only
+                    if target_var in left and target_var not in right:
+                        result += f"""
+Step 1: Target variable '{target_var}' appears on left side
+{equation}
+
+Step 2: Use algebraic manipulation to isolate {target_var}
+
+General steps:
+• Move terms without {target_var} to the right side
+• Factor out {target_var} if it appears multiple times
+• Apply inverse operations (÷, √, log, etc.) as needed
+
+✅ For this equation, {target_var} can be solved by rearranging terms
+"""
+                    elif target_var in right and target_var not in left:
+                        result += f"""
+Step 1: Target variable '{target_var}' appears on right side
+{equation}
+
+Step 2: Use algebraic manipulation to isolate {target_var}
+
+General steps:  
+• Move terms without {target_var} to the left side
+• Factor out {target_var} if it appears multiple times
+• Apply inverse operations (÷, √, log, etc.) as needed
+
+✅ For this equation, {target_var} can be solved by rearranging terms
+"""
+                    else:
+                        result += f"""
+Variable '{target_var}' appears on both sides of the equation.
+This requires collecting like terms:
+
+1. Move all terms containing {target_var} to one side
+2. Move all other terms to the opposite side  
+3. Factor out {target_var}
+4. Divide to isolate {target_var}
+
+✅ This is solvable using standard algebraic techniques
+"""
+            else:
+                result += f"""
+💡 GENERAL ALGEBRAIC APPROACH
+
+To solve {equation} for {target_var}:
+
+1. Identify where {target_var} appears in the equation
+2. Use inverse operations to isolate {target_var}
+3. Apply algebraic rules systematically:
+   • Addition ↔ Subtraction  
+   • Multiplication ↔ Division
+   • Exponents ↔ Roots
+   • Exponentials ↔ Logarithms
+
+4. Handle special cases:
+   • Quadratic equations → Use quadratic formula
+   • Factoring when possible
+   • Substitution methods
+
+✅ Every algebraic equation has a systematic solution method
+"""
+            
+            return result
+            
+        except Exception as e:
+            return f"Error solving equation: {str(e)}"
+
+    @mcp.tool()
+    async def physics_formula_solver(formula_name: str, known_values: str, solve_for: str) -> str:
+        """
+        Solve common physics formulas with known values.
+        
+        Args:
+            formula_name: Name of physics formula ("kinetic_energy", "force", "momentum", etc.)
+            known_values: JSON string with known values (e.g., '{"m": 2.0, "K": 100}')
+            solve_for: Variable to solve for
+            
+        Returns:
+            str: Numerical solution with units and explanation
+        """
+        try:
+            import json
+            
+            known = json.loads(known_values)
+            result = f"""
+    Physics Formula Solver:
+    ======================
+
+    Formula: {formula_name}
+    Known values: {known}
+    Solving for: {solve_for}
+
+    """
+            
+            if formula_name == "kinetic_energy":
+                result += "Formula: K = ½mv²\n\n"
+                
+                if solve_for == "v":
+                    if "K" in known and "m" in known:
+                        K = known["K"]
+                        m = known["m"]
+                        v = math.sqrt(2 * K / m)
+                        result += f"Calculation:\n"
+                        result += f"v = √(2K/m) = √(2×{K}/{m}) = √({2*K/m:.3f}) = {v:.3f}\n"
+                        result += f"\nAnswer: v = {v:.3f} m/s"
+                    else:
+                        result += "Error: Need both K (kinetic energy) and m (mass) to solve for v"
+                        
+                elif solve_for == "m":
+                    if "K" in known and "v" in known:
+                        K = known["K"]
+                        v = known["v"]
+                        m = 2 * K / (v ** 2)
+                        result += f"Calculation:\n"
+                        result += f"m = 2K/v² = 2×{K}/{v}² = {2*K}/{v**2:.3f} = {m:.3f}\n"
+                        result += f"\nAnswer: m = {m:.3f} kg"
+                    else:
+                        result += "Error: Need both K (kinetic energy) and v (velocity) to solve for m"
+                        
+                elif solve_for == "K":
+                    if "m" in known and "v" in known:
+                        m = known["m"]
+                        v = known["v"]
+                        K = 0.5 * m * v ** 2
+                        result += f"Calculation:\n"
+                        result += f"K = ½mv² = ½×{m}×{v}² = 0.5×{m}×{v**2:.3f} = {K:.3f}\n"
+                        result += f"\nAnswer: K = {K:.3f} J"
+                    else:
+                        result += "Error: Need both m (mass) and v (velocity) to solve for K"
+                        
+            elif formula_name == "force":
+                result += "Formula: F = ma\n\n"
+                
+                if solve_for == "F":
+                    if "m" in known and "a" in known:
+                        m = known["m"]
+                        a = known["a"]
+                        F = m * a
+                        result += f"F = ma = {m} × {a} = {F:.3f} N"
+                    else:
+                        result += "Error: Need both m (mass) and a (acceleration)"
+                        
+                elif solve_for == "a":
+                    if "F" in known and "m" in known:
+                        F = known["F"]
+                        m = known["m"]
+                        a = F / m
+                        result += f"a = F/m = {F}/{m} = {a:.3f} m/s²"
+                    else:
+                        result += "Error: Need both F (force) and m (mass)"
+                        
+                elif solve_for == "m":
+                    if "F" in known and "a" in known:
+                        F = known["F"]
+                        a = known["a"]
+                        m = F / a
+                        result += f"m = F/a = {F}/{a} = {m:.3f} kg"
+                    else:
+                        result += "Error: Need both F (force) and a (acceleration)"
+            else:
+                result += f"Formula '{formula_name}' not implemented yet.\n"
+                result += f"Available formulas: kinetic_energy, force"
+            
+            return result
+            
+        except Exception as e:
+            return f"Error in physics calculation: {str(e)}"
     logger.info(
         f'{NAME} MCP Server at {host}:{port} and transport {transport}'
     )
@@ -953,6 +1342,7 @@ def serve(host, port, transport):
         # Start the Streamable HTTP server
         uvicorn.run(mcp.streamable_http_app, host=host, port=port)
 
+    
 def main():
     """CLI entry point for the physics-math-mcp tool."""
     parser = argparse.ArgumentParser(description="Run Physics Math MCP Server")

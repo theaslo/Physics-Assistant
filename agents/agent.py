@@ -344,6 +344,25 @@ class CombinedPhysicsAgent:
         """Direct tool solving for mathematics problems"""
         problem_lower = problem.lower()
         
+        # EQUATION SOLVING - Check first before other tools
+        if any(phrase in problem_lower for phrase in ["solve", "for", "find", "isolate", "rearrange"]):
+            # Check if it's asking to solve for a specific variable
+            if any(pattern in problem_lower for pattern in [
+                "solve", "for", "find", "isolate", "rearrange"]) and any(
+                var in problem_lower for var in ["v", "m", "a", "f", "k", "p", "e", "x", "y", "z"]):
+                
+                # Check if it has specific numerical values (not just fractions like 1/2)
+                import re
+                has_specific_numbers = bool(re.search(r'\b\d+\s*(?:j|kg|m/s|n|joule|newton|kilogram)\b', problem_lower))
+                has_equation_with_numbers = bool(re.search(r'=\s*\d+(?:\.\d+)?(?!\s*[*/])', problem))
+                
+                # If it has numerical values with units or specific numerical answers, use physics_formula_solver
+                if has_specific_numbers or has_equation_with_numbers:
+                    return await self._call_physics_formula_solver_tool(problem)
+                # Otherwise use symbolic solver for abstract equations
+                else:
+                    return await self._call_solve_for_variable_tool(problem)
+    
         # Quadratic equations
         if any(word in problem_lower for word in ["x²", "x^2", "quadratic"]) and ("=" in problem or "solve" in problem_lower):
             return await self._call_quadratic_tool(problem)
@@ -532,6 +551,159 @@ class CombinedPhysicsAgent:
         except Exception as e:
             return f"❌ Error in algebra simplification: {e}"
 
+    async def _call_solve_for_variable_tool(self, problem: str) -> str:
+        """Call solve_for_variable tool for symbolic equation solving"""
+        try:
+            if "solve_for_variable" not in self.tool_dict:
+                return "❌ solve_for_variable tool not available"
+            
+            equation, solve_for = self._parse_equation_solving(problem)
+            
+            tool = self.tool_dict["solve_for_variable"]
+            result = await tool.ainvoke({
+                "equation": equation,
+                "solve_for": solve_for
+            })
+            
+            return f"🎯 **EQUATION SOLVING**\\n\\n{result}\\n\\n✅ **Equation solved using MCP tools**"
+            
+        except Exception as e:
+            return f"❌ Error in equation solving: {e}"
+
+    async def _call_physics_formula_solver_tool(self, problem: str) -> str:
+        """Call physics_formula_solver tool for numerical calculations"""
+        try:
+            if "physics_formula_solver" not in self.tool_dict:
+                return "❌ physics_formula_solver tool not available"
+            
+            formula_name, known_values, solve_for = self._parse_physics_formula(problem)
+            
+            tool = self.tool_dict["physics_formula_solver"]
+            result = await tool.ainvoke({
+                "formula_name": formula_name,
+                "known_values": json.dumps(known_values),
+                "solve_for": solve_for
+            })
+            
+            return f"🎯 **PHYSICS FORMULA SOLUTION**\\n\\n{result}\\n\\n✅ **Calculation completed using MCP tools**"
+            
+        except Exception as e:
+            return f"❌ Error in physics formula calculation: {e}"
+
+    # Add these parsing helper methods:
+
+    def _parse_equation_solving(self, problem: str) -> tuple:
+        """Parse equation and variable to solve for"""
+        problem_lower = problem.lower()
+        
+        # Try to extract equation directly from the problem text first
+        import re
+        
+        # Look for equations with = sign (extract just the equation part)
+        equation_match = re.search(r'(?:solve\s+)?([A-Za-z]\s*=\s*[^,]+?)(?:\s+for\s+\w+|\s*,|$)', problem, re.IGNORECASE)
+        if equation_match:
+            raw_equation = equation_match.group(1).strip()
+            
+            # Clean up the equation - normalize common patterns
+            equation = raw_equation
+            equation = re.sub(r'\b1/2\b', '1/2', equation)  # normalize fractions
+            equation = re.sub(r'\b½\b', '1/2', equation)    # convert ½ to 1/2
+            equation = re.sub(r'\s*\*\s*', ' * ', equation)  # normalize multiplication
+            equation = re.sub(r'\bv\^2\b', 'v^2', equation) # normalize exponents
+            equation = re.sub(r'\bv²\b', 'v^2', equation)   # convert ² to ^2
+        else:
+            # Fall back to common physics equations mapping  
+            equation_patterns = {
+                "kinetic": "K = 1/2 * m * v^2",
+                "k =": "K = 1/2 * m * v^2", 
+                "f = ma": "F = m * a",
+                "force": "F = m * a",
+                "p = mv": "p = m * v",
+                "momentum": "p = m * v",
+                "e = mc": "E = m * c^2",
+                "energy": "E = m * c^2"
+            }
+            
+            equation = "K = 1/2 * m * v^2"  # default
+            for key, eq in equation_patterns.items():
+                if key in problem_lower:
+                    equation = eq
+                    break
+        
+        # Try to identify what to solve for
+        solve_for = "v"  # default
+        solve_patterns = {
+            "for v": "v", "velocity": "v", "speed": "v",
+            "for m": "m", "mass": "m", 
+            "for a": "a", "acceleration": "a",
+            "for f": "F", "force": "F",
+            "for k": "K", "kinetic": "K",
+            "for p": "p", "momentum": "p",
+            "for e": "E", "energy": "E"
+        }
+        
+        for pattern, var in solve_patterns.items():
+            if pattern in problem_lower:
+                solve_for = var
+                break
+        
+        # Handle explicit equations in the problem
+        if "=" in problem:
+            # Extract the actual equation from the problem
+            import re
+            eq_match = re.search(r'([A-Za-z]\s*=\s*[^,\.]+)', problem)
+            if eq_match:
+                equation = eq_match.group(1).strip()
+                # Convert to standard format
+                equation = equation.replace("½", "1/2").replace("²", "^2")
+        
+        return equation, solve_for
+
+    def _parse_physics_formula(self, problem: str) -> tuple:
+        """Parse physics formula parameters for numerical solving"""
+        problem_lower = problem.lower()
+        
+        # Determine formula type
+        formula_name = "kinetic_energy"  # default
+        if any(word in problem_lower for word in ["force", "f = ma"]):
+            formula_name = "force"
+        elif any(word in problem_lower for word in ["momentum", "p = mv"]):
+            formula_name = "momentum"
+        
+        # Extract numerical values
+        known_values = {}
+        solve_for = "v"  # default
+        
+        import re
+        
+        # Look for numerical values with units
+        value_patterns = {
+            r'(\d+(?:\.\d+)?)\s*j': ('K', 'Joules'),
+            r'(\d+(?:\.\d+)?)\s*kg': ('m', 'mass'),
+            r'(\d+(?:\.\d+)?)\s*m/s': ('v', 'velocity'),
+            r'(\d+(?:\.\d+)?)\s*n': ('F', 'force'),
+            r'(\d+(?:\.\d+)?)\s*m/s²': ('a', 'acceleration')
+        }
+        
+        for pattern, (var, unit) in value_patterns.items():
+            match = re.search(pattern, problem_lower)
+            if match:
+                known_values[var] = float(match.group(1))
+        
+        # Determine what to solve for
+        if "find" in problem_lower:
+            if any(word in problem_lower for word in ["velocity", "speed", "v"]):
+                solve_for = "v"
+            elif any(word in problem_lower for word in ["mass", "m"]):
+                solve_for = "m"
+            elif any(word in problem_lower for word in ["acceleration", "a"]):
+                solve_for = "a"
+            elif any(word in problem_lower for word in ["force", "f"]):
+                solve_for = "F"
+            elif any(word in problem_lower for word in ["energy", "kinetic", "k"]):
+                solve_for = "K"
+        
+        return formula_name, known_values, solve_for
     # KINEMATICS-SPECIFIC DIRECT TOOL METHODS
     async def _solve_kinematics_problem_direct(self, problem: str) -> str:
         """Direct tool solving for kinematics problems"""
