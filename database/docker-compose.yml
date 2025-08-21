@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: physics_assistant_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: physics_assistant
+      POSTGRES_USER: physics_user
+      POSTGRES_PASSWORD: physics_secure_password_2024
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    networks:
+      - physics_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U physics_user -d physics_assistant"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  adminer:
+    image: adminer:4.8.1
+    container_name: physics_assistant_adminer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+      ADMINER_DESIGN: galkaev
+    networks:
+      - physics_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    container_name: physics_assistant_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - physics_network
+    command: redis-server --appendonly yes --requirepass redis_secure_password_2024
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis_secure_password_2024", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  neo4j:
+    image: docker.io/neo4j:5.11-community
+    container_name: physics_assistant_neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/physics_graph_password_2024
+      NEO4J_dbms_memory_heap_initial__size: 256m
+      NEO4J_dbms_memory_heap_max__size: 512m
+      NEO4J_dbms_memory_pagecache_size: 256m
+    ports:
+      - "7474:7474"  # HTTP
+      - "7687:7687"  # Bolt
+    volumes:
+      - neo4j_data:/data
+    networks:
+      - physics_network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  neo4j_data:
+    driver: local
+
+networks:
+  physics_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

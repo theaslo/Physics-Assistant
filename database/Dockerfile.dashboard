@@ -1,0 +1,115 @@
+# Multi-stage Dockerfile for Dashboard API Server
+FROM python:3.11-slim as builder
+
+# Set build arguments
+ARG BUILD_DATE
+ARG VERSION
+ARG VCS_REF
+
+# Add metadata labels
+LABEL org.label-schema.build-date=$BUILD_DATE \
+      org.label-schema.name="Physics Assistant Dashboard API" \
+      org.label-schema.description="Advanced analytics dashboard backend API" \
+      org.label-schema.version=$VERSION \
+      org.label-schema.vcs-ref=$VCS_REF \
+      org.label-schema.vcs-url="https://github.com/physics-assistant/dashboard-api" \
+      org.label-schema.schema-version="1.0"
+
+# Install system dependencies for building
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    make \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create application user
+RUN groupadd -r dashboard && useradd -r -g dashboard dashboard
+
+# Set working directory
+WORKDIR /build
+
+# Copy requirements first for better caching
+COPY dashboard_requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r dashboard_requirements.txt
+
+# Production stage
+FROM python:3.11-slim as production
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    libpq5 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create application user
+RUN groupadd -r dashboard && useradd -r -g dashboard dashboard
+
+# Create directories
+RUN mkdir -p /app/logs /app/backups /app/cache && \
+    chown -R dashboard:dashboard /app
+
+# Copy Python packages from builder
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Set working directory
+WORKDIR /app
+
+# Copy application code
+COPY --chown=dashboard:dashboard . .
+
+# Make scripts executable
+RUN chmod +x start_dashboard_api.py
+
+# Switch to application user
+USER dashboard
+
+# Expose port
+EXPOSE 8001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8001/dashboard/health || exit 1
+
+# Set environment variables
+ENV PYTHONPATH=/app \
+    PYTHONUNBUFFERED=1 \
+    DASHBOARD_HOST=0.0.0.0 \
+    DASHBOARD_PORT=8001
+
+# Command to run the application
+CMD ["python", "start_dashboard_api.py"]
+
+# Development stage
+FROM production as development
+
+# Switch back to root for development tools
+USER root
+
+# Install development dependencies
+RUN pip install --no-cache-dir \
+    pytest \
+    pytest-asyncio \
+    pytest-cov \
+    black \
+    flake8 \
+    mypy
+
+# Copy development configuration
+COPY --chown=dashboard:dashboard test_dashboard_api.py .
+COPY --chown=dashboard:dashboard .env.development .env
+
+# Switch back to application user
+USER dashboard
+
+# Development environment variables
+ENV DASHBOARD_RELOAD=true \
+    LOG_LEVEL=DEBUG
+
+# Override command for development
+CMD ["python", "start_dashboard_api.py"]

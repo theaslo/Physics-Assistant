@@ -1,0 +1,254 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: database-api
+  namespace: physics-assistant
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: database-api
+  template:
+    metadata:
+      labels:
+        app: database-api
+    spec:
+      imagePullSecrets:
+      - name: container-registry-secret
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+      - name: database-api
+        image: physics-assistant/database-api:latest
+        ports:
+        - containerPort: 8001
+        env:
+        - name: POSTGRES_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: physics-assistant-config
+              key: POSTGRES_HOST
+        - name: POSTGRES_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: physics-assistant-config
+              key: POSTGRES_PORT
+        - name: POSTGRES_DB
+          valueFrom:
+            configMapKeyRef:
+              name: physics-assistant-config
+              key: POSTGRES_DB
+        - name: POSTGRES_USER
+          valueFrom:
+            configMapKeyRef:
+              name: physics-assistant-config
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: physics-assistant-secrets
+              key: physics-db-password
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: physics-assistant-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: physics-assistant-config
+              key: REDIS_PORT
+        - name: NEO4J_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: physics-assistant-config
+              key: NEO4J_HOST
+        - name: NEO4J_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: physics-assistant-config
+              key: NEO4J_PORT
+        - name: NEO4J_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: physics-assistant-secrets
+              key: neo4j-password
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 2
+            memory: 2Gi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 10
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: database-api-service
+  namespace: physics-assistant
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8001"
+    prometheus.io/path: "/metrics"
+spec:
+  selector:
+    app: database-api
+  ports:
+  - port: 8001
+    targetPort: 8001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard-api
+  namespace: physics-assistant
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: dashboard-api
+  template:
+    metadata:
+      labels:
+        app: dashboard-api
+    spec:
+      imagePullSecrets:
+      - name: container-registry-secret
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+      - name: dashboard-api
+        image: physics-assistant/dashboard-api:latest
+        ports:
+        - containerPort: 8002
+        env:
+        - name: DATABASE_API_HOST
+          value: "database-api-service"
+        - name: DATABASE_API_PORT
+          value: "8001"
+        envFrom:
+        - configMapRef:
+            name: physics-assistant-config
+        - secretRef:
+            name: physics-assistant-secrets
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 2
+            memory: 2Gi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8002
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8002
+          initialDelaySeconds: 10
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard-api-service
+  namespace: physics-assistant
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8002"
+    prometheus.io/path: "/metrics"
+spec:
+  selector:
+    app: dashboard-api
+  ports:
+  - port: 8002
+    targetPort: 8002
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: physics-agents-api
+  namespace: physics-assistant
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: physics-agents-api
+  template:
+    metadata:
+      labels:
+        app: physics-agents-api
+    spec:
+      imagePullSecrets:
+      - name: container-registry-secret
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+      - name: physics-agents-api
+        image: physics-assistant/physics-agents-api:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: DATABASE_API_HOST
+          value: "database-api-service"
+        - name: DATABASE_API_PORT
+          value: "8001"
+        envFrom:
+        - configMapRef:
+            name: physics-assistant-config
+        resources:
+          requests:
+            cpu: 1
+            memory: 2Gi
+          limits:
+            cpu: 3
+            memory: 4Gi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: physics-agents-api-service
+  namespace: physics-assistant
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
+    prometheus.io/path: "/metrics"
+spec:
+  selector:
+    app: physics-agents-api
+  ports:
+  - port: 8000
+    targetPort: 8000

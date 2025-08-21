@@ -1,6 +1,6 @@
 import streamlit as st
 from components.auth import AuthManager
-from services.data_manager import SessionDataManager
+from services.database_client import get_data_manager
 from config import Config
 
 def main():
@@ -19,7 +19,7 @@ def main():
             st.switch_page("pages/login.py")
         return
     
-    session_manager = SessionDataManager()
+    session_manager = get_data_manager(Config.DATABASE_API_URL)
     user_info = st.session_state.get('user_info', {})
     
     st.title("⚙️ Settings & Preferences")

@@ -258,11 +258,16 @@ class ChatInterface:
     
     def _handle_user_input(self, user_input: str):
         """Process user text input"""
-        # Add user message to chat history
+        # Add user message to chat history with enhanced logging
         user_message = {
             'role': 'user',
             'content': user_input,
-            'timestamp': time.time()
+            'timestamp': time.time(),
+            'agent_id': self.agent_id,
+            'metadata': {
+                'interaction_type': 'text_message',
+                'user_agent': st.context.headers.get('user-agent', 'unknown') if hasattr(st, 'context') else 'unknown'
+            }
         }
         
         # Use agent-specific chat history
@@ -272,21 +277,49 @@ class ChatInterface:
         
         st.session_state[chat_history_key].append(user_message)
         
+        # Log to enhanced session data manager if available
+        try:
+            from services.database_client import get_data_manager
+            from config import Config
+            session_manager = get_data_manager(Config.DATABASE_API_URL)
+            session_manager.save_chat_message(user_message)
+        except Exception as e:
+            # Fallback to basic session state logging
+            pass
+        
         # Get response from agent
         with st.spinner("Thinking..."):
             response = self._get_agent_response(user_input)
         
         
-        # Add agent response to chat history
+        # Add agent response to chat history with enhanced logging
         agent_message = {
             'role': 'assistant',
             'content': response,
-            'timestamp': time.time()
+            'timestamp': time.time(),
+            'agent_id': self.agent_id,
+            'agent_icon': self.agent_info.get('icon', '🤖'),
+            'response_time': time.time() - (user_message.get('timestamp', time.time())),
+            'metadata': {
+                'api_client_used': True,
+                'agent_type': 'physics_api',
+                'interaction_type': 'text_message'
+            }
         }
         
         # Use agent-specific chat history
         chat_history_key = f'chat_history_{self.agent_id}'
         st.session_state[chat_history_key].append(agent_message)
+        
+        # Log to enhanced session data manager if available
+        try:
+            from services.database_client import get_data_manager
+            from config import Config
+            session_manager = get_data_manager(Config.DATABASE_API_URL)
+            session_manager.save_chat_message(agent_message)
+        except Exception as e:
+            # Fallback to basic session state logging
+            pass
         
         # Force UI to update to show the new message
         st.rerun()

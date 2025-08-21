@@ -1,0 +1,68 @@
+# Dashboard API Server Requirements
+# Advanced backend APIs for analytics dashboard consumption
+
+# Core FastAPI and ASGI
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# WebSocket and SSE support
+websockets>=12.0
+sse-starlette>=1.8.2
+
+# Data processing and analytics
+pandas>=2.1.0
+numpy>=1.24.0
+scipy>=1.11.0
+scikit-learn>=1.3.0
+
+# Database and caching
+asyncpg>=0.29.0
+redis[hiredis]>=5.0.0
+sqlalchemy>=2.0.0
+
+# Authentication and security
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-multipart>=0.0.6
+
+# Monitoring and metrics
+prometheus-client>=0.19.0
+psutil>=5.9.0
+
+# Data export formats
+openpyxl>=3.1.0
+xlswriter>=3.1.0
+
+# HTTP client for external APIs
+httpx>=0.25.0
+aiohttp>=3.9.0
+
+# Configuration and environment
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+python-dotenv>=1.0.0
+
+# Background task processing
+celery>=5.3.0
+kombu>=5.3.0
+
+# Compression and performance
+python-gzip>=1.0
+brotli>=1.1.0
+
+# Date and time handling
+python-dateutil>=2.8.2
+pytz>=2023.3
+
+# JSON handling
+orjson>=3.9.0
+
+# Rate limiting
+slowapi>=0.1.9
+
+# Development and testing dependencies
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.12.0
+httpx>=0.25.0  # For testing

@@ -1,0 +1,86 @@
+{
+  "service_strategies": [
+    {
+      "service": "physics-agents-api",
+      "type": "probabilistic",
+      "param": 0.5,
+      "max_traces_per_second": 100,
+      "operation_strategies": [
+        {
+          "operation": "/api/chat",
+          "type": "probabilistic",
+          "param": 1.0
+        },
+        {
+          "operation": "/api/agents/*",
+          "type": "probabilistic",
+          "param": 0.8
+        }
+      ]
+    },
+    {
+      "service": "physics-database-api",
+      "type": "probabilistic",
+      "param": 0.3,
+      "max_traces_per_second": 200,
+      "operation_strategies": [
+        {
+          "operation": "/api/students/*",
+          "type": "probabilistic",
+          "param": 0.5
+        },
+        {
+          "operation": "/api/analytics/*",
+          "type": "probabilistic",
+          "param": 1.0
+        }
+      ]
+    },
+    {
+      "service": "physics-dashboard-api",
+      "type": "probabilistic",
+      "param": 0.2,
+      "max_traces_per_second": 50
+    },
+    {
+      "service": "physics-mcp-*",
+      "type": "probabilistic",
+      "param": 0.1,
+      "max_traces_per_second": 300
+    },
+    {
+      "service": "physics-streamlit-ui",
+      "type": "probabilistic",
+      "param": 0.1,
+      "max_traces_per_second": 100
+    },
+    {
+      "service": "physics-react-dashboard",
+      "type": "probabilistic",
+      "param": 0.1,
+      "max_traces_per_second": 50
+    }
+  ],
+  "default_strategy": {
+    "type": "probabilistic",
+    "param": 0.05,
+    "max_traces_per_second": 1000
+  },
+  "per_operation_strategies": [
+    {
+      "operation": "health-check",
+      "type": "probabilistic",
+      "param": 0.01
+    },
+    {
+      "operation": "metrics",
+      "type": "probabilistic",
+      "param": 0.01
+    },
+    {
+      "operation": "error",
+      "type": "probabilistic",
+      "param": 1.0
+    }
+  ]
+}

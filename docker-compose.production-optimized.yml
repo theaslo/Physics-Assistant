@@ -1,0 +1,771 @@
+# Production-Optimized Docker Compose for Physics Assistant Platform
+# Phase 5.4: Security Hardening and Performance Optimization
+version: '3.8'
+
+networks:
+  physics-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+      options:
+        com.docker.network.bridge.enable_icc: "false"
+        com.docker.network.bridge.enable_ip_masquerade: "true"
+        com.docker.network.driver.mtu: "1500"
+    labels:
+      - "security.policy=restricted"
+
+volumes:
+  postgres-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/physics-assistant/data/postgres
+  neo4j-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/physics-assistant/data/neo4j
+  redis-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/physics-assistant/data/redis
+  vault-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/physics-assistant/data/vault
+  elasticsearch-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/physics-assistant/data/elasticsearch
+  prometheus-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/physics-assistant/data/prometheus
+  grafana-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/physics-assistant/data/grafana
+  security-reports:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/physics-assistant/security/reports
+
+services:
+  # Security Infrastructure
+  vault:
+    build:
+      context: .
+      dockerfile: docker/security/vault/Dockerfile
+    container_name: physics-vault
+    environment:
+      VAULT_ADDR: http://127.0.0.1:8200
+      VAULT_DB_PASSWORD: ${VAULT_DB_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      GRAFANA_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+    volumes:
+      - vault-data:/vault/data
+      - ./security/vault/tls:/vault/config/tls:ro
+    networks:
+      - physics-network
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    cap_add:
+      - IPC_LOCK
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  trivy-scanner:
+    build:
+      context: .
+      dockerfile: docker/security/trivy/Dockerfile
+    container_name: physics-trivy-scanner
+    environment:
+      SECURITY_WEBHOOK_URL: ${SECURITY_WEBHOOK_URL}
+    volumes:
+      - security-reports:/scanner/reports
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - physics-network
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+
+  image-signer:
+    build:
+      context: .
+      dockerfile: docker/security/signing/Dockerfile
+    container_name: physics-image-signer
+    environment:
+      REGISTRY: ${CONTAINER_REGISTRY}
+    volumes:
+      - security-reports:/signing/reports
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - physics-network
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+
+  incident-response:
+    build:
+      context: .
+      dockerfile: docker/security/incident-response/Dockerfile
+    container_name: physics-incident-response
+    environment:
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+    volumes:
+      - security-reports:/incident-response/reports
+    networks:
+      - physics-network
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+    depends_on:
+      - postgres
+      - redis
+
+  # Performance and Observability
+  elasticsearch:
+    build:
+      context: .
+      dockerfile: docker/monitoring/elasticsearch/Dockerfile
+    container_name: physics-elasticsearch
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: true
+      ELASTIC_PASSWORD: ${ELASTICSEARCH_PASSWORD}
+      ES_JAVA_OPTS: "-Xms2g -Xmx2g"
+      bootstrap.memory_lock: true
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    networks:
+      - physics-network
+    restart: unless-stopped
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+
+  jaeger:
+    build:
+      context: .
+      dockerfile: docker/monitoring/jaeger/Dockerfile
+    container_name: physics-jaeger
+    environment:
+      SPAN_STORAGE_TYPE: elasticsearch
+      ES_SERVER_URLS: http://elasticsearch:9200
+      ES_USERNAME: elastic
+      ES_PASSWORD: ${ELASTICSEARCH_PASSWORD}
+    networks:
+      - physics-network
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+    depends_on:
+      - elasticsearch
+
+  otel-collector:
+    build:
+      context: .
+      dockerfile: docker/monitoring/otel-collector/Dockerfile
+    container_name: physics-otel-collector
+    environment:
+      ELASTICSEARCH_USERNAME: elastic
+      ELASTICSEARCH_PASSWORD: ${ELASTICSEARCH_PASSWORD}
+    networks:
+      - physics-network
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+    depends_on:
+      - elasticsearch
+      - jaeger
+      - prometheus
+
+  query-optimizer:
+    build:
+      context: .
+      dockerfile: docker/optimization/query-optimizer/Dockerfile
+    container_name: physics-query-optimizer
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      NEO4J_HOST: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+    networks:
+      - physics-network
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.5'
+    depends_on:
+      - postgres
+      - redis
+      - neo4j
+
+  # Enhanced Database Services
+  postgres:
+    build:
+      context: .
+      dockerfile: docker/database/postgresql/Dockerfile
+    container_name: physics-postgres
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PHYSICS_DB_PASSWORD: ${PHYSICS_DB_PASSWORD}
+      MONITOR_DB_PASSWORD: ${MONITOR_DB_PASSWORD}
+      VAULT_DB_PASSWORD: ${VAULT_DB_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./database/backups:/var/lib/postgresql/backups
+      - ./security/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    networks:
+      - physics-network
+    restart: unless-stopped
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    build:
+      context: .
+      dockerfile: docker/database/redis/Dockerfile
+    container_name: physics-redis
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    volumes:
+      - redis-data:/data
+      - ./security/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    networks:
+      - physics-network
+    restart: unless-stopped
+    command: redis-server /usr/local/etc/redis/redis.conf
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  neo4j:
+    build:
+      context: .
+      dockerfile: docker/database/neo4j/Dockerfile
+    container_name: physics-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD}
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: 'yes'
+      NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
+      NEO4J_dbms_security_auth__minimum__password__length: 12
+      NEO4J_dbms_logs_security_level: INFO
+    volumes:
+      - neo4j-data:/data
+      - ./database/neo4j/logs:/logs
+      - ./database/neo4j/backups:/var/lib/neo4j/backups
+    networks:
+      - physics-network
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+          cpus: '3.0'
+
+  # Enhanced API Services with Security
+  database-api:
+    build:
+      context: .
+      dockerfile: docker/api/database-api/Dockerfile
+    container_name: physics-database-api
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: physics_assistant
+      POSTGRES_USER: physics_user
+      POSTGRES_PASSWORD: ${PHYSICS_DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      NEO4J_HOST: neo4j
+      NEO4J_PORT: 7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: ${VAULT_TOKEN}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: physics-database-api
+    volumes:
+      - ./database/logs:/app/logs
+      - ./database/backups:/app/backups
+    networks:
+      - physics-network
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/tmp
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.5'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    depends_on:
+      - postgres
+      - redis
+      - neo4j
+      - vault
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  dashboard-api:
+    build:
+      context: .
+      dockerfile: docker/api/dashboard-api/Dockerfile
+    container_name: physics-dashboard-api
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: physics_assistant
+      POSTGRES_USER: physics_user
+      POSTGRES_PASSWORD: ${PHYSICS_DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      NEO4J_HOST: neo4j
+      NEO4J_PORT: 7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      DATABASE_API_HOST: database-api
+      DATABASE_API_PORT: 8001
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: ${VAULT_TOKEN}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: physics-dashboard-api
+    volumes:
+      - ./database/logs:/app/logs
+      - ./database/exports:/app/exports
+    networks:
+      - physics-network
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/tmp
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    depends_on:
+      - database-api
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  physics-agents-api:
+    build:
+      context: .
+      dockerfile: docker/api/physics-agents/Dockerfile
+    container_name: physics-agents-api
+    environment:
+      DATABASE_API_HOST: database-api
+      DATABASE_API_PORT: 8001
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: ${VAULT_TOKEN}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: physics-agents-api
+    volumes:
+      - ./UI/logs:/app/logs
+      - ./UI/temp:/app/temp
+    networks:
+      - physics-network
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/tmp
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+    depends_on:
+      - database-api
+      - vault
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Enhanced Frontend Services
+  streamlit-ui:
+    build:
+      context: .
+      dockerfile: docker/frontend/streamlit-ui/Dockerfile
+    container_name: physics-streamlit-ui
+    environment:
+      PHYSICS_API_HOST: physics-agents-api
+      PHYSICS_API_PORT: 8000
+      DATABASE_API_HOST: database-api
+      DATABASE_API_PORT: 8001
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_SERVICE_NAME: physics-streamlit-ui
+    volumes:
+      - ./UI/logs:/app/logs
+      - ./UI/uploads:/app/uploads
+      - ./UI/temp:/app/temp
+    networks:
+      - physics-network
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/tmp
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+    depends_on:
+      - physics-agents-api
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  react-dashboard:
+    build:
+      context: .
+      dockerfile: docker/frontend/react-dashboard/Dockerfile
+    container_name: physics-react-dashboard
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_SERVICE_NAME: physics-react-dashboard
+    networks:
+      - physics-network
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    depends_on:
+      - dashboard-api
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  nginx-gateway:
+    build:
+      context: .
+      dockerfile: docker/frontend/nginx-gateway/Dockerfile
+    container_name: physics-nginx-gateway
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./security/nginx/ssl:/etc/nginx/ssl:ro
+      - ./security/nginx/dhparam.pem:/etc/nginx/dhparam.pem:ro
+    networks:
+      - physics-network
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /var/run
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    depends_on:
+      - streamlit-ui
+      - react-dashboard
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Enhanced MCP Services (showing one example)
+  mcp-forces:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    container_name: physics-mcp-forces
+    environment:
+      MCP_SERVICE: forces
+      MCP_PORT: 10100
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: streamable_http
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: physics-mcp-forces
+    networks:
+      - physics-network
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:10100/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Enhanced Monitoring Stack
+  prometheus:
+    build:
+      context: .
+      dockerfile: docker/monitoring/prometheus/Dockerfile
+    container_name: physics-prometheus
+    volumes:
+      - prometheus-data:/prometheus/data
+      - ./monitoring/prometheus/rules:/etc/prometheus/rules:ro
+    networks:
+      - physics-network
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus/data'
+      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.retention.size=10GB'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+      - '--log.level=info'
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+
+  grafana:
+    build:
+      context: .
+      dockerfile: docker/monitoring/grafana/Dockerfile
+    container_name: physics-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_SECURITY_SECRET_KEY: ${GRAFANA_SECRET_KEY}
+      GF_USERS_ALLOW_SIGN_UP: false
+      GF_ANALYTICS_REPORTING_ENABLED: false
+      GF_INSTALL_PLUGINS: grafana-piechart-panel,grafana-worldmap-panel
+      GF_LOG_LEVEL: info
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - physics-network
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # System Monitoring
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: physics-node-exporter
+    command:
+      - '--path.rootfs=/host'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--no-collector.ipvs'
+    pid: host
+    volumes:
+      - '/:/host:ro,rslave'
+    networks:
+      - physics-network
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.25'
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: physics-cadvisor
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      - physics-network
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'

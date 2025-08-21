@@ -1,0 +1,90 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: physics-assistant-storage
+provisioner: kubernetes.io/aws-ebs  # Change based on your cloud provider
+parameters:
+  type: gp3
+  fsType: ext4
+  encrypted: "true"
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: physics-assistant
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: physics-assistant-storage
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: neo4j-pvc
+  namespace: physics-assistant
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: physics-assistant-storage
+  resources:
+    requests:
+      storage: 30Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-pvc
+  namespace: physics-assistant
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: physics-assistant-storage
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-pvc
+  namespace: physics-assistant
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: physics-assistant-storage
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-pvc
+  namespace: physics-assistant
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: physics-assistant-storage
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ml-models-pvc
+  namespace: physics-assistant
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: physics-assistant-storage
+  resources:
+    requests:
+      storage: 5Gi

@@ -1,0 +1,54 @@
+{
+  "global": {
+    "enable_rag": true,
+    "rag_api_url": "http://localhost:8001",
+    "max_concepts": 7,
+    "max_formulas": 3,
+    "max_examples": 2,
+    "similarity_threshold": 0.3,
+    "enable_personalization": true,
+    "track_progress": true,
+    "update_student_profile": true,
+    "enable_caching": true,
+    "cache_ttl_seconds": 300,
+    "enable_fallback": true,
+    "timeout_seconds": 30,
+    "enable_cross_agent_context": true,
+    "share_learning_paths": true,
+    "coordinate_concepts": true,
+    "enable_difficulty_adaptation": true,
+    "difficulty_levels": [
+      "beginner",
+      "intermediate",
+      "advanced"
+    ],
+    "adaptation_strategy": "dynamic"
+  },
+  "agents": {
+    "forces_agent": {
+      "enable_rag": true,
+      "rag_api_url": "http://localhost:8001",
+      "max_concepts": 7,
+      "max_formulas": 5,
+      "max_examples": 2,
+      "similarity_threshold": 0.3,
+      "enable_personalization": true,
+      "track_progress": true,
+      "update_student_profile": true,
+      "enable_caching": true,
+      "cache_ttl_seconds": 300,
+      "enable_fallback": true,
+      "timeout_seconds": 30,
+      "enable_cross_agent_context": true,
+      "share_learning_paths": true,
+      "coordinate_concepts": true,
+      "enable_difficulty_adaptation": true,
+      "difficulty_levels": [
+        "beginner",
+        "intermediate",
+        "advanced"
+      ],
+      "adaptation_strategy": "dynamic"
+    }
+  }
+}

@@ -2,9 +2,15 @@ import asyncio
 import json
 import requests
 import websockets
+import time
+import logging
 from typing import Dict, Optional, Any, List
 import streamlit as st
 from config import Config
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class MCPClient:
     """Client for communicating with MCP (Model Context Protocol) server"""
@@ -18,6 +24,64 @@ class MCPClient:
         # Set up headers
         if self.api_key:
             self.session.headers.update({'Authorization': f'Bearer {self.api_key}'})
+        
+        # Initialize database client for logging
+        self.db_client = None
+        if Config.DATABASE_LOGGING_ENABLED:
+            try:
+                from .database_client import DatabaseAPIClient
+                self.db_client = DatabaseAPIClient(Config.DATABASE_API_URL)
+                logger.info("✅ Database logging enabled for MCP client")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to initialize database logging: {e}")
+    
+    def _log_mcp_interaction(self, 
+                           operation: str,
+                           agent_id: str,
+                           request_data: Dict[str, Any],
+                           response_data: Dict[str, Any],
+                           execution_time_ms: int,
+                           success: bool) -> None:
+        """Log MCP interaction to database if logging is enabled"""
+        if not self.db_client or not self.db_client.is_connected:
+            return
+            
+        try:
+            # Get user info for logging
+            user_info = st.session_state.get('user_info', {})
+            user_id = user_info.get('id', 'anonymous')
+            
+            # Prepare metadata
+            metadata = {
+                'operation': operation,
+                'mcp_server_url': self.base_url,
+                'websocket_url': self.websocket_url,
+                'request_data': request_data,
+                'response_status': 'success' if success else 'error',
+                'execution_time_ms': execution_time_ms,
+                'mcp_client_version': '1.0.0',
+                'streamlit_session_id': st.session_state.get('session_id'),
+                'timestamp': time.time(),
+                'has_api_key': bool(self.api_key)
+            }
+            
+            # Format message for database logging
+            message = f"MCP {operation}: {request_data.get('message', request_data.get('content', 'N/A'))}"
+            response = response_data.get('content', str(response_data))
+            
+            # Log to database
+            self.db_client.log_interaction(
+                user_id=user_id,
+                agent_type=f"mcp_{agent_id}",
+                message=message,
+                response=response,
+                session_id=st.session_state.get('db_session_id'),
+                execution_time_ms=execution_time_ms,
+                metadata=metadata
+            )
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to log MCP interaction: {e}")
     
     def get_available_agents(self) -> List[Dict[str, Any]]:
         """Get list of available agents from MCP server"""
@@ -105,16 +169,51 @@ class MCPClient:
     
     def send_message_sync(self, agent_id: str, message: str, user_id: str) -> Dict[str, Any]:
         """Synchronous wrapper for sending messages"""
+        start_time = time.time()
+        request_data = {
+            'agent_id': agent_id,
+            'message': message,
+            'user_id': user_id
+        }
+        
         try:
             # For Streamlit compatibility, we'll use HTTP API instead of WebSocket
             # In production, you might want to use WebSocket with proper async handling
-            return self._send_http_message(agent_id, message, user_id)
+            response_data = self._send_http_message(agent_id, message, user_id)
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            
+            success = response_data.get('status') == 'success'
+            
+            # Log interaction to database
+            self._log_mcp_interaction(
+                operation="send_message",
+                agent_id=agent_id,
+                request_data=request_data,
+                response_data=response_data,
+                execution_time_ms=execution_time_ms,
+                success=success
+            )
+            
+            return response_data
         except Exception as e:
-            return {
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            error_response = {
                 'status': 'error',
                 'message': str(e),
                 'content': f"I apologize, but I'm having trouble connecting to the physics tutoring service. This is a demo response for your message: '{message}'"
             }
+            
+            # Log failed interaction
+            self._log_mcp_interaction(
+                operation="send_message",
+                agent_id=agent_id,
+                request_data=request_data,
+                response_data=error_response,
+                execution_time_ms=execution_time_ms,
+                success=False
+            )
+            
+            return error_response
     
     def _send_http_message(self, agent_id: str, message: str, user_id: str) -> Dict[str, Any]:
         """Send message via HTTP API (fallback)"""

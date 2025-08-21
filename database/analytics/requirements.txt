@@ -1,0 +1,17 @@
+# Analytics Package Requirements for Physics Assistant
+# Core scientific computing
+numpy>=1.21.0
+pandas>=1.3.0
+scipy>=1.7.0
+
+# Machine learning and data mining
+scikit-learn>=1.0.0
+
+# Graph analysis
+networkx>=2.6.0
+
+# Optional dependencies for enhanced functionality
+# matplotlib>=3.5.0  # For visualization
+# seaborn>=0.11.0    # For statistical plots
+# plotly>=5.0.0      # For interactive dashboards
+# jupyter>=1.0.0     # For notebook-based analysis

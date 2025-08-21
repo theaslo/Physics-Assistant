@@ -1,14 +1,20 @@
 """
 API Client for Physics Assistant FastAPI server
 Handles communication with the FastAPI backend hosting CombinedPhysicsAgent
+Enhanced with database logging via database API integration
 """
 
 import requests
 import json
 import time
+import logging
 from typing import Dict, List, Optional, Any
 import streamlit as st
 from config import Config
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class PhysicsAPIClient:
     """Client for communicating with the Physics Assistant FastAPI server"""
@@ -20,6 +26,16 @@ class PhysicsAPIClient:
             'Content-Type': 'application/json',
             'Accept': 'application/json'
         })
+        
+        # Initialize database client for logging
+        self.db_client = None
+        if Config.DATABASE_LOGGING_ENABLED:
+            try:
+                from .database_client import DatabaseAPIClient
+                self.db_client = DatabaseAPIClient(Config.DATABASE_API_URL)
+                logger.info("✅ Database logging enabled for API client")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to initialize database logging: {e}")
         
         # Test connection on initialization
         self._test_connection()
@@ -38,6 +54,52 @@ class PhysicsAPIClient:
     def is_connected(self) -> bool:
         """Check if API is connected"""
         return st.session_state.get('api_connected', False)
+    
+    def _log_api_interaction(self, 
+                           operation: str,
+                           agent_id: str,
+                           request_data: Dict[str, Any],
+                           response_data: Dict[str, Any],
+                           execution_time_ms: int,
+                           success: bool) -> None:
+        """Log API interaction to database if logging is enabled"""
+        if not self.db_client or not self.db_client.is_connected:
+            return
+            
+        try:
+            # Get user info for logging
+            user_info = st.session_state.get('user_info', {})
+            user_id = user_info.get('id', 'anonymous')
+            
+            # Prepare metadata
+            metadata = {
+                'operation': operation,
+                'api_endpoint': f"{self.base_url}/{operation}",
+                'request_data': request_data,
+                'response_status': 'success' if success else 'error',
+                'execution_time_ms': execution_time_ms,
+                'api_client_version': '1.0.0',
+                'streamlit_session_id': st.session_state.get('session_id'),
+                'timestamp': time.time()
+            }
+            
+            # Format message for database logging
+            message = f"API {operation}: {request_data.get('problem', request_data.get('message', 'N/A'))}"
+            response = response_data.get('solution', response_data.get('content', str(response_data)))
+            
+            # Log to database
+            self.db_client.log_interaction(
+                user_id=user_id,
+                agent_type=f"api_{agent_id}",
+                message=message,
+                response=response,
+                session_id=st.session_state.get('db_session_id'),
+                execution_time_ms=execution_time_ms,
+                metadata=metadata
+            )
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to log API interaction: {e}")
     
     def create_agent(self, agent_id: str, use_direct_tools: bool = True) -> Dict[str, Any]:
         """
@@ -96,6 +158,13 @@ class PhysicsAPIClient:
         Returns:
             Dict containing solution and metadata
         """
+        start_time = time.time()
+        request_data = {
+            "problem": problem,
+            "context": context,
+            "use_direct_tools": use_direct_tools
+        }
+        
         try:
             payload = {
                 "problem": problem,
@@ -112,24 +181,64 @@ class PhysicsAPIClient:
                 timeout=60  # Longer timeout for problem solving
             )
             
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            
             if response.status_code == 200:
-                return response.json()
+                response_data = response.json()
+                success = response_data.get('success', True)
+                
+                # Log interaction to database
+                self._log_api_interaction(
+                    operation="solve_problem",
+                    agent_id=agent_id,
+                    request_data=request_data,
+                    response_data=response_data,
+                    execution_time_ms=execution_time_ms,
+                    success=success
+                )
+                
+                return response_data
             else:
                 error_detail = response.json().get('detail', 'Unknown error')
-                return {
+                error_response = {
                     'success': False,
                     'agent_id': agent_id,
                     'problem': problem,
                     'error': f"HTTP {response.status_code}: {error_detail}"
                 }
                 
+                # Log failed interaction
+                self._log_api_interaction(
+                    operation="solve_problem",
+                    agent_id=agent_id,
+                    request_data=request_data,
+                    response_data=error_response,
+                    execution_time_ms=execution_time_ms,
+                    success=False
+                )
+                
+                return error_response
+                
         except requests.exceptions.RequestException as e:
-            return {
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            error_response = {
                 'success': False,
                 'agent_id': agent_id,
                 'problem': problem,
                 'error': f"Connection error: {str(e)}"
             }
+            
+            # Log failed interaction
+            self._log_api_interaction(
+                operation="solve_problem",
+                agent_id=agent_id,
+                request_data=request_data,
+                response_data=error_response,
+                execution_time_ms=execution_time_ms,
+                success=False
+            )
+            
+            return error_response
     
     def check_agent_health(self, agent_id: str, use_direct_tools: bool = True) -> Dict[str, Any]:
         """

@@ -31,6 +31,14 @@ class AgentCreateRequest(BaseModel):
         default=True, 
         description="Whether to use direct MCP tools (recommended)"
     )
+    enable_rag: bool = Field(
+        default=True,
+        description="Whether to enable RAG context augmentation"
+    )
+    rag_api_url: str = Field(
+        default="http://localhost:8001",
+        description="URL for RAG API server"
+    )
 
 class AgentCreateResponse(BaseModel):
     """Response model for agent creation"""
@@ -46,6 +54,14 @@ class ProblemSolveRequest(BaseModel):
         default=None, 
         description="Optional context for the problem"
     )
+    user_id: Optional[str] = Field(
+        default="api_user",
+        description="User identifier for database logging"
+    )
+    session_id: Optional[str] = Field(
+        default=None,
+        description="Session identifier for database logging"
+    )
 
 class ProblemSolveResponse(BaseModel):
     """Response model for problem solving"""
@@ -55,6 +71,7 @@ class ProblemSolveResponse(BaseModel):
     solution: Optional[str] = None
     reasoning: Optional[str] = None
     tools_used: Optional[list] = None
+    execution_time_ms: Optional[int] = None
     metadata: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 
@@ -93,19 +110,23 @@ app.add_middleware(
 )
 
 # Helper functions
-async def get_or_create_agent(agent_id: str, use_direct_tools: bool = True) -> CombinedPhysicsAgent:
-    """Get existing agent or create new one"""
-    agent_key = f"{agent_id}_{use_direct_tools}"
+async def get_or_create_agent(agent_id: str, use_direct_tools: bool = True, enable_rag: bool = True, rag_api_url: str = "http://localhost:8001") -> CombinedPhysicsAgent:
+    """Get existing agent or create new one with RAG and database logging enabled"""
+    agent_key = f"{agent_id}_{use_direct_tools}_{enable_rag}"
     
     if agent_key not in agent_store:
-        logger.info(f"Creating new agent: {agent_id}")
+        logger.info(f"Creating new agent: {agent_id} (RAG: {'enabled' if enable_rag else 'disabled'})")
         agent = CombinedPhysicsAgent(
             agent_id=agent_id,
-            use_direct_tools=use_direct_tools
+            use_direct_tools=use_direct_tools,
+            database_api_url="http://localhost:8001",
+            enable_database_logging=True,
+            enable_rag=enable_rag,
+            rag_api_url=rag_api_url
         )
         await agent.initialize()
         agent_store[agent_key] = agent
-        logger.info(f"Agent {agent_id} created and initialized")
+        logger.info(f"Agent {agent_id} created and initialized with database logging and RAG: {'enabled' if enable_rag else 'disabled'}")
     
     return agent_store[agent_key]
 
@@ -138,7 +159,7 @@ async def create_agent(request: AgentCreateRequest) -> AgentCreateResponse:
         logger.info(f"Creating agent: {request.agent_id}")
         
         # Get or create agent using the existing function
-        agent = await get_or_create_agent(request.agent_id, request.use_direct_tools)
+        agent = await get_or_create_agent(request.agent_id, request.use_direct_tools, request.enable_rag, request.rag_api_url)
         
         # Get capabilities
         capabilities = await agent.get_capabilities()
@@ -161,7 +182,9 @@ async def create_agent(request: AgentCreateRequest) -> AgentCreateResponse:
 async def solve_problem(
     agent_id: str, 
     request: ProblemSolveRequest,
-    use_direct_tools: bool = True
+    use_direct_tools: bool = True,
+    enable_rag: bool = True,
+    rag_api_url: str = "http://localhost:8001"
 ) -> ProblemSolveResponse:
     """
     Solve a physics problem using the specified agent
@@ -176,12 +199,17 @@ async def solve_problem(
             )
         
         # Get or create agent
-        agent = await get_or_create_agent(agent_id, use_direct_tools)
+        agent = await get_or_create_agent(agent_id, use_direct_tools, enable_rag, rag_api_url)
         
         logger.info(f"Solving problem with {agent_id}: {request.problem[:50]}...")
         
-        # Solve the problem
-        result = await agent.solve_problem(request.problem, request.context)
+        # Solve the problem with user and session context for database logging
+        result = await agent.solve_problem(
+            problem=request.problem, 
+            context=request.context,
+            user_id=request.user_id,
+            session_id=request.session_id
+        )
         
         return ProblemSolveResponse(**result)
         
@@ -214,7 +242,7 @@ async def check_agent_health(
             )
         
         # Get or create agent
-        agent = await get_or_create_agent(agent_id, use_direct_tools)
+        agent = await get_or_create_agent(agent_id, use_direct_tools, enable_rag, rag_api_url)
         
         # Get health status
         health = await agent.health_check()
@@ -246,7 +274,7 @@ async def get_agent_capabilities(
             )
         
         # Get or create agent
-        agent = await get_or_create_agent(agent_id, use_direct_tools)
+        agent = await get_or_create_agent(agent_id, use_direct_tools, enable_rag, rag_api_url)
         
         # Get capabilities
         capabilities = await agent.get_capabilities()
@@ -334,6 +362,60 @@ async def health_check():
         "active_agents": len(agent_store),
         "agent_keys": list(agent_store.keys())
     }
+
+# RAG Configuration Endpoints
+@app.get("/rag/status")
+async def get_rag_status():
+    """
+    Get RAG system status and configuration
+    """
+    try:
+        # Check how many agents have RAG enabled
+        rag_enabled_agents = [
+            key for key in agent_store.keys() 
+            if key.split("_")[-1] == "True"  # enable_rag is the last part of the key
+        ]
+        
+        return {
+            "status": "available",
+            "rag_enabled_agents": len(rag_enabled_agents),
+            "total_agents": len(agent_store),
+            "rag_endpoints": [
+                "/rag/query",
+                "/rag/semantic-search", 
+                "/rag/graph-search",
+                "/rag/learning-path"
+            ]
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+@app.post("/rag/clear-cache")
+async def clear_rag_cache():
+    """
+    Clear RAG client caches for all agents
+    """
+    try:
+        cleared_count = 0
+        for agent in agent_store.values():
+            if hasattr(agent, 'rag_client') and agent.rag_client:
+                agent.rag_client.clear_cache()
+                cleared_count += 1
+        
+        return {
+            "status": "success",
+            "message": f"RAG cache cleared for {cleared_count} agents"
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to clear RAG cache: {str(e)}"
+        )
 
 if __name__ == "__main__":
     import uvicorn

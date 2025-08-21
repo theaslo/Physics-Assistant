@@ -1,0 +1,247 @@
+# Development Docker Compose for Physics Assistant Platform
+version: '3.8'
+
+networks:
+  physics-dev-network:
+    driver: bridge
+
+volumes:
+  postgres-dev-data:
+    driver: local
+  neo4j-dev-data:
+    driver: local
+  redis-dev-data:
+    driver: local
+
+services:
+  # Database Services (Development)
+  postgres-dev:
+    build:
+      context: .
+      dockerfile: docker/database/postgresql/Dockerfile
+    container_name: physics-postgres-dev
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: dev_postgres_password
+      PHYSICS_DB_PASSWORD: dev_physics_password
+      MONITOR_DB_PASSWORD: dev_monitor_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-dev-data:/var/lib/postgresql/data
+      - ./database/backups:/var/lib/postgresql/backups
+    networks:
+      - physics-dev-network
+    restart: unless-stopped
+
+  neo4j-dev:
+    build:
+      context: .
+      dockerfile: docker/database/neo4j/Dockerfile
+    container_name: physics-neo4j-dev
+    environment:
+      NEO4J_AUTH: neo4j/dev_neo4j_password
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: 'yes'
+      NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j-dev-data:/data
+      - ./database/neo4j/logs:/logs
+    networks:
+      - physics-dev-network
+    restart: unless-stopped
+
+  redis-dev:
+    build:
+      context: .
+      dockerfile: docker/database/redis/Dockerfile
+    container_name: physics-redis-dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-dev-data:/data
+    networks:
+      - physics-dev-network
+    restart: unless-stopped
+
+  # API Services (Development)
+  database-api-dev:
+    build:
+      context: .
+      dockerfile: docker/api/database-api/Dockerfile
+    container_name: physics-database-api-dev
+    environment:
+      POSTGRES_HOST: postgres-dev
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: physics_assistant
+      POSTGRES_USER: physics_user
+      POSTGRES_PASSWORD: dev_physics_password
+      REDIS_HOST: redis-dev
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: physics_redis_2024
+      NEO4J_HOST: neo4j-dev
+      NEO4J_PORT: 7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: dev_neo4j_password
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./database:/app/database
+      - ./database/logs:/app/logs
+    networks:
+      - physics-dev-network
+    depends_on:
+      - postgres-dev
+      - redis-dev
+      - neo4j-dev
+    restart: unless-stopped
+
+  dashboard-api-dev:
+    build:
+      context: .
+      dockerfile: docker/api/dashboard-api/Dockerfile
+    container_name: physics-dashboard-api-dev
+    environment:
+      POSTGRES_HOST: postgres-dev
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: physics_assistant
+      POSTGRES_USER: physics_user
+      POSTGRES_PASSWORD: dev_physics_password
+      REDIS_HOST: redis-dev
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: physics_redis_2024
+      NEO4J_HOST: neo4j-dev
+      NEO4J_PORT: 7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: dev_neo4j_password
+      DATABASE_API_HOST: database-api-dev
+      DATABASE_API_PORT: 8001
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./database:/app/database
+      - ./database/logs:/app/logs
+    networks:
+      - physics-dev-network
+    depends_on:
+      - database-api-dev
+    restart: unless-stopped
+
+  # MCP Services (Development)
+  mcp-forces-dev:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    container_name: physics-mcp-forces-dev
+    environment:
+      MCP_SERVICE: forces
+      MCP_PORT: 10100
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: streamable_http
+    ports:
+      - "10100:10100"
+    volumes:
+      - ./mcp_tools:/app/mcp_tools
+    networks:
+      - physics-dev-network
+    restart: unless-stopped
+
+  mcp-kinematics-dev:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    container_name: physics-mcp-kinematics-dev
+    environment:
+      MCP_SERVICE: kinematics
+      MCP_PORT: 10100
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: streamable_http
+    ports:
+      - "10101:10100"
+    volumes:
+      - ./mcp_tools:/app/mcp_tools
+    networks:
+      - physics-dev-network
+    restart: unless-stopped
+
+  mcp-math-dev:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    container_name: physics-mcp-math-dev
+    environment:
+      MCP_SERVICE: math
+      MCP_PORT: 10100
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: streamable_http
+    ports:
+      - "10103:10100"
+    volumes:
+      - ./mcp_tools:/app/mcp_tools
+    networks:
+      - physics-dev-network
+    restart: unless-stopped
+
+  # Frontend Services (Development with hot reload)
+  streamlit-ui-dev:
+    build:
+      context: .
+      dockerfile: docker/frontend/streamlit-ui/Dockerfile
+    container_name: physics-streamlit-ui-dev
+    environment:
+      PHYSICS_API_HOST: physics-agents-api-dev
+      PHYSICS_API_PORT: 8000
+      DATABASE_API_HOST: database-api-dev
+      DATABASE_API_PORT: 8001
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./UI/frontend:/app/frontend
+      - ./UI/logs:/app/logs
+    networks:
+      - physics-dev-network
+    restart: unless-stopped
+
+  # React Dashboard (Development with live reload)
+  react-dashboard-dev:
+    image: node:20-alpine
+    container_name: physics-react-dashboard-dev
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./dashboard-ui:/app
+    environment:
+      - VITE_API_URL=http://localhost:8002
+    networks:
+      - physics-dev-network
+    restart: unless-stopped
+
+  # Basic monitoring for development
+  prometheus-dev:
+    image: prom/prometheus:latest
+    container_name: physics-prometheus-dev
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - physics-dev-network
+    restart: unless-stopped
+
+  grafana-dev:
+    image: grafana/grafana:latest
+    container_name: physics-grafana-dev
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: dev_admin_password
+    ports:
+      - "3000:3000"
+    networks:
+      - physics-dev-network
+    depends_on:
+      - prometheus-dev
+    restart: unless-stopped

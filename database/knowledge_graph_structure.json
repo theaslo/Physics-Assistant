@@ -1,0 +1,268 @@
+{
+  "statistics": {
+    "total_nodes": 262,
+    "total_relationships": 698,
+    "node_distribution": {
+      "Domain": 4,
+      "Subdomain": 10,
+      "Concept": 133,
+      "Formula": 32,
+      "Problem": 37,
+      "Explanation": 31,
+      "Unit": 10,
+      "LearningPath": 5
+    },
+    "relationship_distribution": {
+      "CONTAINS": 175,
+      "HAS_PROBLEM": 37,
+      "APPLIES_CONCEPT": 37,
+      "HAS_EXPLANATION": 31,
+      "PREREQUISITE_FOR": 74,
+      "REQUIRES": 74,
+      "RELATED_TO": 84,
+      "DESCRIBES": 80,
+      "HAS_FORMULA": 80,
+      "INCLUDES": 26
+    },
+    "targets_met": {
+      "nodes_200_plus": true,
+      "relationships_500_plus": true
+    },
+    "required_node_types_present": {
+      "Domain": true,
+      "Subdomain": true,
+      "Concept": true,
+      "Formula": true,
+      "Problem": true,
+      "Explanation": true,
+      "Unit": true,
+      "LearningPath": true
+    },
+    "required_relationship_types_present": {
+      "CONTAINS": true,
+      "PREREQUISITE_FOR": true,
+      "REQUIRES": true,
+      "RELATED_TO": true,
+      "HAS_PROBLEM": true,
+      "HAS_FORMULA": true,
+      "HAS_EXPLANATION": true,
+      "APPLIES_CONCEPT": true,
+      "DESCRIBES": true,
+      "INCLUDES": true
+    }
+  },
+  "sample_nodes": {
+    "domain_1": {
+      "id": "domain_1",
+      "type": "Domain",
+      "properties": {
+        "name": "mechanics",
+        "description": "Physics domain: Mechanics",
+        "created_at": "2025-08-14 15:25:24.099534"
+      }
+    },
+    "domain_2": {
+      "id": "domain_2",
+      "type": "Domain",
+      "properties": {
+        "name": "waves_oscillations",
+        "description": "Physics domain: Waves and Oscillations",
+        "created_at": "2025-08-14 15:25:24.099563"
+      }
+    },
+    "domain_3": {
+      "id": "domain_3",
+      "type": "Domain",
+      "properties": {
+        "name": "thermodynamics",
+        "description": "Physics domain: Thermodynamics",
+        "created_at": "2025-08-14 15:25:24.099567"
+      }
+    },
+    "domain_4": {
+      "id": "domain_4",
+      "type": "Domain",
+      "properties": {
+        "name": "electromagnetism",
+        "description": "Physics domain: Electromagnetism",
+        "created_at": "2025-08-14 15:25:24.099571"
+      }
+    },
+    "subdomain_5": {
+      "id": "subdomain_5",
+      "type": "Subdomain",
+      "properties": {
+        "name": "kinematics",
+        "description": "Kinematics: Motion description",
+        "created_at": "2025-08-14 15:25:24.099577"
+      }
+    },
+    "subdomain_6": {
+      "id": "subdomain_6",
+      "type": "Subdomain",
+      "properties": {
+        "name": "forces",
+        "description": "Forces: Newton's laws and force analysis",
+        "created_at": "2025-08-14 15:25:24.099584"
+      }
+    },
+    "subdomain_7": {
+      "id": "subdomain_7",
+      "type": "Subdomain",
+      "properties": {
+        "name": "energy",
+        "description": "Energy: Work-energy and conservation",
+        "created_at": "2025-08-14 15:25:24.099588"
+      }
+    },
+    "subdomain_8": {
+      "id": "subdomain_8",
+      "type": "Subdomain",
+      "properties": {
+        "name": "momentum",
+        "description": "Momentum: Linear momentum and collisions",
+        "created_at": "2025-08-14 15:25:24.099593"
+      }
+    },
+    "subdomain_9": {
+      "id": "subdomain_9",
+      "type": "Subdomain",
+      "properties": {
+        "name": "rotational_motion",
+        "description": "Rotational Motion: Angular dynamics",
+        "created_at": "2025-08-14 15:25:24.099597"
+      }
+    },
+    "subdomain_10": {
+      "id": "subdomain_10",
+      "type": "Subdomain",
+      "properties": {
+        "name": "oscillations",
+        "description": "Oscillations: Simple harmonic motion",
+        "created_at": "2025-08-14 15:25:24.099602"
+      }
+    }
+  },
+  "sample_relationships": [
+    {
+      "from": "domain_1",
+      "type": "CONTAINS",
+      "to": "subdomain_5",
+      "properties": {}
+    },
+    {
+      "from": "domain_1",
+      "type": "CONTAINS",
+      "to": "subdomain_6",
+      "properties": {}
+    },
+    {
+      "from": "domain_1",
+      "type": "CONTAINS",
+      "to": "subdomain_7",
+      "properties": {}
+    },
+    {
+      "from": "domain_1",
+      "type": "CONTAINS",
+      "to": "subdomain_8",
+      "properties": {}
+    },
+    {
+      "from": "domain_1",
+      "type": "CONTAINS",
+      "to": "subdomain_9",
+      "properties": {}
+    },
+    {
+      "from": "domain_2",
+      "type": "CONTAINS",
+      "to": "subdomain_10",
+      "properties": {}
+    },
+    {
+      "from": "domain_2",
+      "type": "CONTAINS",
+      "to": "subdomain_11",
+      "properties": {}
+    },
+    {
+      "from": "domain_3",
+      "type": "CONTAINS",
+      "to": "subdomain_12",
+      "properties": {}
+    },
+    {
+      "from": "domain_4",
+      "type": "CONTAINS",
+      "to": "subdomain_13",
+      "properties": {}
+    },
+    {
+      "from": "domain_4",
+      "type": "CONTAINS",
+      "to": "subdomain_14",
+      "properties": {}
+    },
+    {
+      "from": "subdomain_5",
+      "type": "CONTAINS",
+      "to": "concept_15",
+      "properties": {}
+    },
+    {
+      "from": "subdomain_5",
+      "type": "CONTAINS",
+      "to": "concept_16",
+      "properties": {}
+    },
+    {
+      "from": "subdomain_5",
+      "type": "CONTAINS",
+      "to": "concept_17",
+      "properties": {}
+    },
+    {
+      "from": "subdomain_5",
+      "type": "CONTAINS",
+      "to": "concept_18",
+      "properties": {}
+    },
+    {
+      "from": "subdomain_5",
+      "type": "CONTAINS",
+      "to": "concept_19",
+      "properties": {}
+    },
+    {
+      "from": "subdomain_5",
+      "type": "CONTAINS",
+      "to": "concept_20",
+      "properties": {}
+    },
+    {
+      "from": "subdomain_5",
+      "type": "CONTAINS",
+      "to": "concept_21",
+      "properties": {}
+    },
+    {
+      "from": "subdomain_5",
+      "type": "CONTAINS",
+      "to": "concept_22",
+      "properties": {}
+    },
+    {
+      "from": "subdomain_5",
+      "type": "CONTAINS",
+      "to": "concept_23",
+      "properties": {}
+    },
+    {
+      "from": "subdomain_6",
+      "type": "CONTAINS",
+      "to": "concept_24",
+      "properties": {}
+    }
+  ]
+}

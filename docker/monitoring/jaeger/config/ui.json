@@ -1,0 +1,56 @@
+{
+  "monitor": {
+    "menuEnabled": true
+  },
+  "dependencies": {
+    "dagMaxNumServices": 200,
+    "menuEnabled": true
+  },
+  "archiveEnabled": true,
+  "tracking": {
+    "gaID": "",
+    "trackErrors": true
+  },
+  "menu": [
+    {
+      "label": "Physics Assistant Docs",
+      "url": "https://physics-assistant.local/docs",
+      "newWindow": true
+    },
+    {
+      "label": "Grafana Dashboard",
+      "url": "https://physics-assistant.local/grafana",
+      "newWindow": true
+    },
+    {
+      "label": "Prometheus Metrics",
+      "url": "https://physics-assistant.local/prometheus",
+      "newWindow": true
+    }
+  ],
+  "linkPatterns": [
+    {
+      "type": "logs",
+      "key": "logsLink",
+      "url": "https://physics-assistant.local/grafana/explore?orgId=1&left=%5B%22now-1h%22,%22now%22,%22Loki%22,%7B%22expr%22:%22%7Btrace_id%3D%5C%22#{traceID}%5C%22%7D%22%7D%5D",
+      "text": "View Logs for Trace"
+    },
+    {
+      "type": "metrics",
+      "key": "metricsLink", 
+      "url": "https://physics-assistant.local/grafana/explore?orgId=1&left=%5B%22now-1h%22,%22now%22,%22Prometheus%22,%7B%22expr%22:%22%7Bspan_name%3D%5C%22#{operationName}%5C%22%7D%22%7D%5D",
+      "text": "View Metrics for Operation"
+    }
+  ],
+  "search": {
+    "maxLookback": {
+      "label": "2 Days",
+      "value": "2d"
+    }
+  },
+  "spanView": {
+    "collapseSpans": false,
+    "listView": true
+  },
+  "pathAgnosticDeduplication": true
+}

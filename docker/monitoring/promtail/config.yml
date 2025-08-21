@@ -1,0 +1,234 @@
+# Promtail Configuration for Physics Assistant
+# Log collection and forwarding to Loki
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # Nginx access logs
+  - job_name: nginx-access
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: nginx
+          type: access
+          service: nginx-loadbalancer
+          __path__: /var/log/nginx/access*.log
+    pipeline_stages:
+      - regex:
+          expression: '^(?P<remote_addr>[\d\.]+) - (?P<remote_user>\S+) \[(?P<time_local>[^\]]+)\] "(?P<method>\S+) (?P<request_uri>\S+) (?P<protocol>\S+)" (?P<status>\d+) (?P<body_bytes_sent>\d+) "(?P<http_referer>[^"]*)" "(?P<http_user_agent>[^"]*)" "(?P<http_x_forwarded_for>[^"]*)" rt=(?P<request_time>[\d\.]+) uct="(?P<upstream_connect_time>[^"]*)" uht="(?P<upstream_header_time>[^"]*)" urt="(?P<upstream_response_time>[^"]*)"'
+      - labels:
+          remote_addr:
+          method:
+          status:
+          request_time:
+      - drop:
+          expression: '.*health.*'
+          older_than: 1h
+
+  # Nginx error logs
+  - job_name: nginx-error
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: nginx
+          type: error
+          service: nginx-loadbalancer
+          __path__: /var/log/nginx/error*.log
+    pipeline_stages:
+      - regex:
+          expression: '^(?P<timestamp>\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}) \[(?P<level>\w+)\] (?P<pid>\d+)#(?P<tid>\d+): (?P<message>.*)'
+      - labels:
+          level:
+          pid:
+
+  # Application logs from containers
+  - job_name: docker-containers
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+    relabel_configs:
+      # Only process containers with specific labels
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        regex: '(physics-.*|streamlit-.*|react-.*|mcp-.*|database-.*|dashboard-.*)'
+        action: keep
+      # Set job name from service label
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        target_label: job
+      # Set service name
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        target_label: service
+      # Set container name
+      - source_labels: [__meta_docker_container_name]
+        target_label: container
+      # Set environment
+      - replacement: production
+        target_label: environment
+    pipeline_stages:
+      # Parse JSON logs if they exist
+      - json:
+          expressions:
+            level: level
+            timestamp: timestamp
+            message: message
+            service: service
+            module: module
+      # Extract log level from message if not in JSON
+      - regex:
+          expression: '(?i)(?P<level>DEBUG|INFO|WARN|ERROR|FATAL|CRITICAL)'
+      - labels:
+          level:
+          service:
+          module:
+
+  # PostgreSQL logs
+  - job_name: postgresql
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: postgresql
+          service: postgres-primary
+          __path__: /host/logs/postgres/*.log
+    pipeline_stages:
+      - regex:
+          expression: '^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} \w+) \[(?P<pid>\d+)\] (?P<level>\w+):  (?P<message>.*)'
+      - labels:
+          level:
+          pid:
+      - timestamp:
+          source: timestamp
+          format: '2006-01-02 15:04:05.000 MST'
+
+  # Redis logs
+  - job_name: redis
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: redis
+          service: redis-cluster
+          __path__: /host/logs/redis/*.log
+    pipeline_stages:
+      - regex:
+          expression: '^(?P<pid>\d+):(?P<role>\w+) (?P<timestamp>\d{2} \w{3} \d{4} \d{2}:\d{2}:\d{2}\.\d{3}) (?P<level>[\*\#\-\.]) (?P<message>.*)'
+      - labels:
+          level:
+          role:
+          pid:
+
+  # Neo4j logs
+  - job_name: neo4j
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: neo4j
+          service: neo4j-cluster
+          __path__: /host/logs/neo4j/*.log
+    pipeline_stages:
+      - regex:
+          expression: '^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})[+\-]\d{4} (?P<level>\w+)\s+\[(?P<thread>[^\]]+)\] (?P<logger>[^:]+): (?P<message>.*)'
+      - labels:
+          level:
+          thread:
+          logger:
+
+  # System logs
+  - job_name: syslog
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: syslog
+          __path__: /var/log/syslog
+    pipeline_stages:
+      - regex:
+          expression: '^(?P<timestamp>\w+\s+\d+\s+\d{2}:\d{2}:\d{2}) (?P<hostname>\S+) (?P<service>\S+)(?:\[(?P<pid>\d+)\])?: (?P<message>.*)'
+      - labels:
+          hostname:
+          service:
+          pid:
+
+  # Kubernetes logs (if running in K8s)
+  - job_name: kubernetes-pods
+    kubernetes_sd_configs:
+      - role: pod
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: ${1}:${2}
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_pod_label_(.+)
+      - source_labels: [__meta_kubernetes_namespace]
+        action: replace
+        target_label: kubernetes_namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: kubernetes_pod_name
+    pipeline_stages:
+      - cri: {}
+      - json:
+          expressions:
+            level: level
+            timestamp: timestamp
+            message: message
+      - labels:
+          level:
+
+  # Custom application metrics logs
+  - job_name: physics-metrics
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: physics-metrics
+          __path__: /host/logs/physics/*.log
+    pipeline_stages:
+      - json:
+          expressions:
+            level: level
+            timestamp: timestamp
+            message: message
+            user_id: user_id
+            session_id: session_id
+            action: action
+            duration_ms: duration_ms
+            error_code: error_code
+      - labels:
+          level:
+          user_id:
+          action:
+          error_code:
+      # Extract performance metrics
+      - regex:
+          expression: 'duration_ms":(?P<duration>\d+)'
+      - metrics:
+          request_duration_ms:
+            type: Histogram
+            description: "Request duration in milliseconds"
+            source: duration
+            config:
+              buckets: [10, 50, 100, 500, 1000, 5000, 10000]
+
+# Target configuration
+target_config:
+  sync_period: 10s

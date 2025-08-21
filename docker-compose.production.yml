@@ -1,0 +1,525 @@
+# Production Docker Compose for Physics Assistant Platform
+version: '3.8'
+
+networks:
+  physics-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  postgres-data:
+    driver: local
+  neo4j-data:
+    driver: local
+  redis-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+  alertmanager-data:
+    driver: local
+
+services:
+  # Database Services
+  postgres:
+    build:
+      context: .
+      dockerfile: docker/database/postgresql/Dockerfile
+    container_name: physics-postgres
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PHYSICS_DB_PASSWORD: ${PHYSICS_DB_PASSWORD}
+      MONITOR_DB_PASSWORD: ${MONITOR_DB_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./database/backups:/var/lib/postgresql/backups
+    networks:
+      - physics-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+
+  neo4j:
+    build:
+      context: .
+      dockerfile: docker/database/neo4j/Dockerfile
+    container_name: physics-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD}
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: 'yes'
+      NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
+    volumes:
+      - neo4j-data:/data
+      - ./database/neo4j/logs:/logs
+      - ./database/neo4j/backups:/var/lib/neo4j/backups
+    networks:
+      - physics-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+          cpus: '1.5'
+
+  redis:
+    build:
+      context: .
+      dockerfile: docker/database/redis/Dockerfile
+    container_name: physics-redis
+    volumes:
+      - redis-data:/data
+    networks:
+      - physics-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+
+  # API Services
+  database-api:
+    build:
+      context: .
+      dockerfile: docker/api/database-api/Dockerfile
+    container_name: physics-database-api
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: physics_assistant
+      POSTGRES_USER: physics_user
+      POSTGRES_PASSWORD: ${PHYSICS_DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: physics_redis_2024
+      NEO4J_HOST: neo4j
+      NEO4J_PORT: 7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+    volumes:
+      - ./database/logs:/app/logs
+      - ./database/backups:/app/backups
+    networks:
+      - physics-network
+    depends_on:
+      - postgres
+      - redis
+      - neo4j
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+
+  dashboard-api:
+    build:
+      context: .
+      dockerfile: docker/api/dashboard-api/Dockerfile
+    container_name: physics-dashboard-api
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: physics_assistant
+      POSTGRES_USER: physics_user
+      POSTGRES_PASSWORD: ${PHYSICS_DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: physics_redis_2024
+      NEO4J_HOST: neo4j
+      NEO4J_PORT: 7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      DATABASE_API_HOST: database-api
+      DATABASE_API_PORT: 8001
+    volumes:
+      - ./database/logs:/app/logs
+      - ./database/exports:/app/exports
+    networks:
+      - physics-network
+    depends_on:
+      - database-api
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+
+  physics-agents-api:
+    build:
+      context: .
+      dockerfile: docker/api/physics-agents/Dockerfile
+    container_name: physics-agents-api
+    environment:
+      DATABASE_API_HOST: database-api
+      DATABASE_API_PORT: 8001
+    volumes:
+      - ./UI/logs:/app/logs
+      - ./UI/temp:/app/temp
+    networks:
+      - physics-network
+    depends_on:
+      - database-api
+      - mcp-forces
+      - mcp-kinematics
+      - mcp-math
+      - mcp-energy
+      - mcp-momentum
+      - mcp-angular-motion
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.5'
+
+  # MCP Services
+  mcp-forces:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    container_name: physics-mcp-forces
+    environment:
+      MCP_SERVICE: forces
+      MCP_PORT: 10100
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: streamable_http
+    networks:
+      - physics-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+
+  mcp-kinematics:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    container_name: physics-mcp-kinematics
+    environment:
+      MCP_SERVICE: kinematics
+      MCP_PORT: 10100
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: streamable_http
+    networks:
+      - physics-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+
+  mcp-math:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    container_name: physics-mcp-math
+    environment:
+      MCP_SERVICE: math
+      MCP_PORT: 10100
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: streamable_http
+    networks:
+      - physics-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+
+  mcp-energy:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    container_name: physics-mcp-energy
+    environment:
+      MCP_SERVICE: energy
+      MCP_PORT: 10100
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: streamable_http
+    networks:
+      - physics-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+
+  mcp-momentum:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    container_name: physics-mcp-momentum
+    environment:
+      MCP_SERVICE: momentum
+      MCP_PORT: 10100
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: streamable_http
+    networks:
+      - physics-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+
+  mcp-angular-motion:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    container_name: physics-mcp-angular-motion
+    environment:
+      MCP_SERVICE: angular-motion
+      MCP_PORT: 10100
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: streamable_http
+    networks:
+      - physics-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+
+  # Frontend Services
+  streamlit-ui:
+    build:
+      context: .
+      dockerfile: docker/frontend/streamlit-ui/Dockerfile
+    container_name: physics-streamlit-ui
+    environment:
+      PHYSICS_API_HOST: physics-agents-api
+      PHYSICS_API_PORT: 8000
+      DATABASE_API_HOST: database-api
+      DATABASE_API_PORT: 8001
+    volumes:
+      - ./UI/logs:/app/logs
+      - ./UI/uploads:/app/uploads
+      - ./UI/temp:/app/temp
+    networks:
+      - physics-network
+    depends_on:
+      - physics-agents-api
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+
+  react-dashboard:
+    build:
+      context: .
+      dockerfile: docker/frontend/react-dashboard/Dockerfile
+    container_name: physics-react-dashboard
+    networks:
+      - physics-network
+    depends_on:
+      - dashboard-api
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+
+  nginx-gateway:
+    build:
+      context: .
+      dockerfile: docker/frontend/nginx-gateway/Dockerfile
+    container_name: physics-nginx-gateway
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - physics-network
+    depends_on:
+      - streamlit-ui
+      - react-dashboard
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+
+  # Analytics Services
+  ml-engine:
+    build:
+      context: .
+      dockerfile: docker/analytics/ml-engine/Dockerfile
+    container_name: physics-ml-engine
+    environment:
+      DATABASE_API_HOST: database-api
+      DATABASE_API_PORT: 8001
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: physics_redis_2024
+    volumes:
+      - ./analytics/models:/app/models
+      - ./analytics/logs:/app/logs
+      - ./analytics/exports:/app/exports
+    networks:
+      - physics-network
+    depends_on:
+      - database-api
+      - redis
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+
+  task-processor:
+    build:
+      context: .
+      dockerfile: docker/analytics/task-processor/Dockerfile
+    container_name: physics-task-processor
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      DATABASE_API_HOST: database-api
+      DATABASE_API_PORT: 8001
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    volumes:
+      - ./analytics/logs:/app/logs
+      - ./analytics/temp:/app/temp
+      - ./analytics/results:/app/results
+    networks:
+      - physics-network
+    depends_on:
+      - redis
+      - database-api
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+
+  flower-monitor:
+    build:
+      context: .
+      dockerfile: docker/analytics/flower-monitor/Dockerfile
+    container_name: physics-flower-monitor
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "5555:5555"
+    networks:
+      - physics-network
+    depends_on:
+      - redis
+      - task-processor
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+
+  # Monitoring Services
+  prometheus:
+    build:
+      context: .
+      dockerfile: docker/monitoring/prometheus/Dockerfile
+    container_name: physics-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus-data:/prometheus/data
+    networks:
+      - physics-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+
+  grafana:
+    build:
+      context: .
+      dockerfile: docker/monitoring/grafana/Dockerfile
+    container_name: physics-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - physics-network
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+
+  alertmanager:
+    build:
+      context: .
+      dockerfile: docker/monitoring/alertmanager/Dockerfile
+    container_name: physics-alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - alertmanager-data:/alertmanager/data
+    networks:
+      - physics-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+
+  # Exporters for monitoring
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: physics-node-exporter
+    command:
+      - '--path.rootfs=/host'
+    pid: host
+    volumes:
+      - '/:/host:ro,rslave'
+    networks:
+      - physics-network
+    restart: unless-stopped
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: physics-cadvisor
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      - physics-network
+    restart: unless-stopped
+    privileged: true

@@ -19,6 +19,10 @@ class Config:
     MCP_WEBSOCKET_URL = os.getenv("MCP_WEBSOCKET_URL", "ws://localhost:8000/ws")
     MCP_API_KEY = os.getenv("MCP_API_KEY", "")
     
+    # Database API Configuration
+    DATABASE_API_URL = os.getenv("DATABASE_API_URL", "http://localhost:8001")
+    DATABASE_LOGGING_ENABLED = os.getenv("DATABASE_LOGGING_ENABLED", "true").lower() == "true"
+    
     # Physics Agents Configuration
     PHYSICS_AGENTS = {
         "kinematics": {

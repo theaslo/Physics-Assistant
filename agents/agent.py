@@ -11,11 +11,18 @@ This agent combines:
 import asyncio
 import json
 import re
+import time
+import logging
+import requests
 from typing import Dict, Any, Optional
 from langchain_ollama.chat_models import ChatOllama
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import SystemMessage
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class CombinedPhysicsAgent:
@@ -33,12 +40,21 @@ class CombinedPhysicsAgent:
                  agent_id: str =  "forces_agent", 
                  llm_base_url: str = "http://ds.stat.uconn.edu:11434", 
                  model: str = "qwen3:8b-q8_0",
-                 use_direct_tools: bool = True):
+                 use_direct_tools: bool = True,
+                 database_api_url: str = "http://localhost:8001",
+                 enable_database_logging: bool = True):
         
         self.agent_id = agent_id
         self.llm_base_url = llm_base_url
         self.model = model
         self.use_direct_tools = use_direct_tools  # Key flag for working mode
+        self.database_api_url = database_api_url
+        self.enable_database_logging = enable_database_logging
+        
+        # Initialize database client for logging
+        self.db_client = None
+        if self.enable_database_logging:
+            self._initialize_database_client()
         
         # Initialize based on agent type
         self._setup_agent_config()
@@ -103,6 +119,88 @@ class CombinedPhysicsAgent:
         else:
             raise ValueError(f"Agent type '{self.agent_id}' not supported. Use 'forces_agent', 'kinematics_agent' or 'math_agent'.")
 
+    def _initialize_database_client(self):
+        """Initialize database client for interaction logging"""
+        try:
+            # Simple HTTP client for database API
+            self.db_client = {
+                'base_url': self.database_api_url.rstrip('/'),
+                'session': requests.Session()
+            }
+            self.db_client['session'].headers.update({
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            })
+            
+            # Test connection
+            response = self.db_client['session'].get(
+                f"{self.db_client['base_url']}/health", 
+                timeout=5
+            )
+            if response.status_code == 200:
+                logger.info(f"✅ Database logging enabled for agent {self.agent_id}")
+            else:
+                logger.warning(f"⚠️ Database API unhealthy for agent {self.agent_id}")
+                self.db_client = None
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to initialize database logging for {self.agent_id}: {e}")
+            self.db_client = None
+
+    def _log_agent_interaction(self, 
+                             problem: str,
+                             solution: str,
+                             tools_used: list,
+                             execution_time_ms: int,
+                             success: bool,
+                             reasoning: str = "",
+                             user_id: str = "agent_direct",
+                             session_id: str = None) -> None:
+        """Log agent interaction to database"""
+        if not self.db_client:
+            return
+            
+        try:
+            metadata = {
+                'agent_type': self.agent_id,
+                'tools_used': tools_used,
+                'execution_time_ms': execution_time_ms,
+                'success': success,
+                'reasoning': reasoning,
+                'llm_model': self.model,
+                'llm_base_url': self.llm_base_url,
+                'use_direct_tools': self.use_direct_tools,
+                'mcp_port': getattr(self, 'mcp_port', None),
+                'timestamp': time.time(),
+                'agent_metadata': self.metadata if hasattr(self, 'metadata') else {}
+            }
+            
+            payload = {
+                'user_id': user_id,
+                'agent_type': f"physics_{self.agent_id}",
+                'message': problem,
+                'response': solution,
+                'session_id': session_id,
+                'execution_time_ms': execution_time_ms,
+                'metadata': metadata
+            }
+            
+            response = self.db_client['session'].post(
+                f"{self.db_client['base_url']}/interactions",
+                json=payload,
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                interaction_id = result.get('interaction_id')
+                logger.info(f"✅ Logged {self.agent_id} interaction: {interaction_id}")
+            else:
+                logger.error(f"❌ Failed to log {self.agent_id} interaction: {response.status_code}")
+                
+        except Exception as e:
+            logger.error(f"❌ Error logging {self.agent_id} interaction: {e}")
+
     async def initialize(self):
         """Initialize the physics agent with MCP tools"""
         if self.initialized:
@@ -141,17 +239,21 @@ class CombinedPhysicsAgent:
             print(f"  - {tool_name}")
         print()
 
-    async def solve_problem(self, problem: str, context: Optional[Dict] = None) -> Dict[str, Any]:
+    async def solve_problem(self, problem: str, context: Optional[Dict] = None, user_id: str = "agent_direct", session_id: str = None) -> Dict[str, Any]:
         """
-        Main method to solve physics problems
+        Main method to solve physics problems with comprehensive logging
         
         Args:
             problem: Text description of the physics problem
             context: Optional context from A2A framework or other agents
+            user_id: User identifier for logging
+            session_id: Session identifier for logging
             
         Returns:
             Dict with solution, reasoning, and metadata
         """
+        start_time = time.time()
+        
         if not self.initialized:
             await self.initialize()
             
@@ -164,6 +266,21 @@ class CombinedPhysicsAgent:
                 # Use LangChain agent approach
                 solution = await self._solve_with_langchain_agent(problem, context)
                 reasoning = "Solved using LangChain agent with MCP tools"
+            
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            tools_used = list(self.tool_dict.keys()) if self.tool_dict else []
+            
+            # Log interaction to database
+            self._log_agent_interaction(
+                problem=problem,
+                solution=solution,
+                tools_used=tools_used,
+                execution_time_ms=execution_time_ms,
+                success=True,
+                reasoning=reasoning,
+                user_id=user_id,
+                session_id=session_id
+            )
                 
             return {
                 "success": True,
@@ -171,17 +288,34 @@ class CombinedPhysicsAgent:
                 "problem": problem,
                 "solution": solution,
                 "reasoning": reasoning,
-                "tools_used": list(self.tool_dict.keys()),
+                "tools_used": tools_used,
+                "execution_time_ms": execution_time_ms,
                 "metadata": self.metadata
             }
             
         except Exception as e:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            error_msg = str(e)
+            
+            # Log failed interaction to database
+            self._log_agent_interaction(
+                problem=problem,
+                solution=f"Error: {error_msg}",
+                tools_used=[],
+                execution_time_ms=execution_time_ms,
+                success=False,
+                reasoning=f"Error in problem solving: {error_msg}",
+                user_id=user_id,
+                session_id=session_id
+            )
+            
             return {
                 "success": False,
                 "agent_id": self.agent_id,
                 "problem": problem,
-                "error": str(e),
-                "reasoning": f"Error in problem solving: {str(e)}"
+                "error": error_msg,
+                "reasoning": f"Error in problem solving: {error_msg}",
+                "execution_time_ms": execution_time_ms
             }
 
     async def _solve_with_direct_tools(self, problem: str) -> str:

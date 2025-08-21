@@ -16,41 +16,153 @@ class AuthManager:
         # In production, this would come from a database or external auth service
         return {
             'usernames': {
-                'student1': {
+                'Lastname_Firstname': {
                     'name': 'Physics Student 1',
                     'password': self._hash_password('password123'),
                     'email': 'student1@university.edu',
                     'role': 'student',
                     'course': 'PHYS101'
                 },
-                'student2': {
-                    'name': 'Physics Student 2',
-                    'password': self._hash_password('password123'),
-                    'email': 'student2@university.edu',
-                    'role': 'student',
-                    'course': 'PHYS101'
-                },
+                # 'student2': {
+                #     'name': 'Physics Student 2',
+                #     'password': self._hash_password('password123'),
+                #     'email': 'student2@university.edu',
+                #     'role': 'student',
+                #     'course': 'PHYS101'
+                # },
                 # Add your students here:
-                'alice_smith': {
-                    'name': 'Alice Smith',
-                    'password': self._hash_password('physics2024'),
-                    'email': 'alice.smith@university.edu', 
+                'Al-Arshani_Laila': {
+                    'name': 'Al-Arshani,Laila H',
+                    'password': self._hash_password('phys1201fa25'),
+                    'email': 'LAILA.AL-ARSHANI@UCONN.EDU', 
                     'role': 'student',
-                    'course': 'PHYS101'
+                    'course': 'PHYS1201'
                 },
-                'bob_jones': {
-                    'name': 'Bob Jones',
-                    'password': self._hash_password('physics2024'),
-                    'email': 'bob.jones@university.edu',
+                'Almudhari_Hasham': {
+                    'name': 'Almudhari,Hasham',
+                    'password': self._hash_password('phys1201fa25'),
+                    'email': 'HASHAM.ALMUDHARI@UCONN.EDU',
                     'role': 'student', 
-                    'course': 'PHYS101'
+                    'course': 'PHYS1201'
                 },
-                'instructor': {
-                    'name': 'Dr. Physics',
-                    'password': self._hash_password('instructor123'),
-                    'email': 'instructor@university.edu',
+                'Arce_Alyssa': {
+                    'name': 'Arce,Alyssa Lanae',
+                    'password': self._hash_password('phys1201fa25'),
+                    'email': 'ALYSSA.ARCE@UCONN.EDU',
+                    'role': 'student', 
+                    'course': 'PHYS1201'
+                },
+                'Aslam_Hanzalah': {
+                    'name': 'Aslam,Hanzalah Mohammad',
+                    'password': self._hash_password('phys1201fa25'),
+                    'email': 'HANZALAH.ASLAM@UCONN.EDU',
+                    'role': 'student', 
+                    'course': 'PHYS1201'
+                },
+                'Bhura_Roomana': {
+                    'name': 'Bhura,Roomana Asif',
+                    'password': self._hash_password('phys1201fa25'),
+                    'email': 'ROOMANA.BHURA@UCONN.EDU',
+                    'role': 'student', 
+                    'course': 'PHYS1201'
+                },
+                'Brytowski_Ayvril': {
+                    'name': 'Brytowski,Ayvril Taylor',
+                    'password': self._hash_password('phys1201fa25'),
+                    'email': 'ATB21008@UCONN.EDU',
+                    'role': 'student', 
+                    'course': 'PHYS1201'
+                },
+                'Casey_Olivia': {
+                    'name': 'Casey,Olivia Judith',
+                    'password': self._hash_password('phys1201fa25'),
+                    'email': 'OHD24001@UCONN.EDU',
+                    'role': 'student', 
+                    'course': 'PHYS1201'
+                },
+                'Chowdhury_Rafiya': {
+                    'name': 'Chowdhury,Rafiya Nur',
+                    'password': self._hash_password('phys1201fa25'),
+                    'email': 'RAFIYA.CHOWDHURY@UCONN.EDU',
+                    'role': 'student', 
+                    'course': 'PHYS1201'
+                },
+                'Dudus_Victoria': {
+                    'name': 'Dudus,Victoria Olivia',
+                    'password': self._hash_password('phys1201fa25'),
+                    'email': 'VICTORIA.DUDUS@UCONN.EDU',
+                    'role': 'student', 
+                    'course': 'PHYS1201'
+                },
+                'Gomez_Keanu': {
+                    'name': 'Gomez,Keanu Jahmil',
+                    'password': self._hash_password('phys1201fa25'),
+                    'email': 'KEANU.GOMEZ@UCONN.EDU',
+                    'role': 'student', 
+                    'course': 'PHYS1201'
+                },
+                'Jaggi_Ayush': {
+                    'name': 'Jaggi,Ayush',
+                    'password': self._hash_password('phys1201fa25'),
+                    'email': 'AYJ23005@UCONN.EDU',
+                    'role': 'student', 
+                    'course': 'PHYS1201'
+                },
+                'Li_Edmond': {
+                    'name': 'Li,Edmond',
+                    'password': self._hash_password('phys1201fa25'),
+                    'email': 'JXF24001@UCONN.EDU',
+                    'role': 'student', 
+                    'course': 'PHYS1201'
+                },
+                'Mathew_Manna': {
+                    'name': 'Mathew,Manna Rebakah',
+                    'password': self._hash_password('phys1201fa25'),
+                    'email': 'MANNA.MATHEW@UCONN.EDU',
+                    'role': 'student', 
+                    'course': 'PHYS1201'
+                },
+                'Miazga_Casper': {
+                    'name': 'Miazga,Casper Patrick',
+                    'password': self._hash_password('phys1201fa25'),
+                    'email': 'CASPER.MIAZGA@UCONN.EDU',
+                    'role': 'student', 
+                    'course': 'PHYS1201'
+                },
+                'Othman_Mostafa': {
+                    'name': 'Othman,Mostafa',
+                    'password': self._hash_password('phys1201fa25'),
+                    'email': 'MOSTAFA.OTHMAN@UCONN.EDU',
+                    'role': 'student', 
+                    'course': 'PHYS1201'
+                },
+                'St_Laurent_Jeyla': {
+                    'name': 'St. Laurent,Jeyla Aaron',
+                    'password': self._hash_password('phys1201fa25'),
+                    'email': 'JEYLA.ST_LAURENT@UCONN.EDU',
+                    'role': 'student', 
+                    'course': 'PHYS1201'
+                },
+                'Trang_Vincent': {
+                    'name': 'Trang,Vincent Thein',
+                    'password': self._hash_password('phys1201fa25'),
+                    'email': 'ENQ24001@UCONN.EDU',
+                    'role': 'student', 
+                    'course': 'PHYS1201'
+                },
+                'Yousaf_Muhammad': {
+                    'name': 'Yousaf,Muhammad Jamal',
+                    'password': self._hash_password('phys1201fa25'),
+                    'email': 'MJY23005@UCONN.EDU',
+                    'role': 'student', 
+                    'course': 'PHYS1201'
+                },
+                'ben': {
+                    'name': 'Dr. T.',
+                    'password': self._hash_password('ben_fa25'),
+                    'email': 'asli.tandogan_kunkel@uconn.edu',
                     'role': 'instructor',
-                    'course': 'PHYS101'
+                    'course': 'PHYS1201'
                 }
             }
         }
@@ -118,11 +230,10 @@ class AuthManager:
             st.markdown("---")
             st.markdown("**Demo Credentials:**")
             st.markdown("""
-            - **Student**: username: `student1`, password: `password123`
-            - **Student**: username: `student2`, password: `password123`
-            - **Instructor**: username: `instructor`, password: `instructor123`
+            - **Student**: username: `Lastname_Firstname`, password: `password`
             """)
-            
+            # - **Student**: username: `student2`, password: `password123`
+            # - **Instructor**: username: `instructor`, password: `instructor123`
             # Help and support links
             st.markdown("---")
             col_help1, col_help2 = st.columns(2)

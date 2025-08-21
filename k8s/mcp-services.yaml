@@ -1,0 +1,389 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-forces
+  namespace: physics-assistant
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mcp-forces
+  template:
+    metadata:
+      labels:
+        app: mcp-forces
+    spec:
+      imagePullSecrets:
+      - name: container-registry-secret
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+      - name: mcp-forces
+        image: physics-assistant/mcp-tools:latest
+        ports:
+        - containerPort: 10100
+        env:
+        - name: MCP_SERVICE
+          value: "forces"
+        - name: MCP_PORT
+          value: "10100"
+        - name: MCP_HOST
+          value: "0.0.0.0"
+        - name: MCP_TRANSPORT
+          value: "streamable_http"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          tcpSocket:
+            port: 10100
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: 10100
+          initialDelaySeconds: 10
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-forces-service
+  namespace: physics-assistant
+spec:
+  selector:
+    app: mcp-forces
+  ports:
+  - port: 10100
+    targetPort: 10100
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-kinematics
+  namespace: physics-assistant
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mcp-kinematics
+  template:
+    metadata:
+      labels:
+        app: mcp-kinematics
+    spec:
+      imagePullSecrets:
+      - name: container-registry-secret
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+      - name: mcp-kinematics
+        image: physics-assistant/mcp-tools:latest
+        ports:
+        - containerPort: 10100
+        env:
+        - name: MCP_SERVICE
+          value: "kinematics"
+        - name: MCP_PORT
+          value: "10100"
+        - name: MCP_HOST
+          value: "0.0.0.0"
+        - name: MCP_TRANSPORT
+          value: "streamable_http"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          tcpSocket:
+            port: 10100
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: 10100
+          initialDelaySeconds: 10
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-kinematics-service
+  namespace: physics-assistant
+spec:
+  selector:
+    app: mcp-kinematics
+  ports:
+  - port: 10100
+    targetPort: 10100
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-math
+  namespace: physics-assistant
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mcp-math
+  template:
+    metadata:
+      labels:
+        app: mcp-math
+    spec:
+      imagePullSecrets:
+      - name: container-registry-secret
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+      - name: mcp-math
+        image: physics-assistant/mcp-tools:latest
+        ports:
+        - containerPort: 10100
+        env:
+        - name: MCP_SERVICE
+          value: "math"
+        - name: MCP_PORT
+          value: "10100"
+        - name: MCP_HOST
+          value: "0.0.0.0"
+        - name: MCP_TRANSPORT
+          value: "streamable_http"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          tcpSocket:
+            port: 10100
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: 10100
+          initialDelaySeconds: 10
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-math-service
+  namespace: physics-assistant
+spec:
+  selector:
+    app: mcp-math
+  ports:
+  - port: 10100
+    targetPort: 10100
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-energy
+  namespace: physics-assistant
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mcp-energy
+  template:
+    metadata:
+      labels:
+        app: mcp-energy
+    spec:
+      imagePullSecrets:
+      - name: container-registry-secret
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+      - name: mcp-energy
+        image: physics-assistant/mcp-tools:latest
+        ports:
+        - containerPort: 10100
+        env:
+        - name: MCP_SERVICE
+          value: "energy"
+        - name: MCP_PORT
+          value: "10100"
+        - name: MCP_HOST
+          value: "0.0.0.0"
+        - name: MCP_TRANSPORT
+          value: "streamable_http"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          tcpSocket:
+            port: 10100
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: 10100
+          initialDelaySeconds: 10
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-energy-service
+  namespace: physics-assistant
+spec:
+  selector:
+    app: mcp-energy
+  ports:
+  - port: 10100
+    targetPort: 10100
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-momentum
+  namespace: physics-assistant
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mcp-momentum
+  template:
+    metadata:
+      labels:
+        app: mcp-momentum
+    spec:
+      imagePullSecrets:
+      - name: container-registry-secret
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+      - name: mcp-momentum
+        image: physics-assistant/mcp-tools:latest
+        ports:
+        - containerPort: 10100
+        env:
+        - name: MCP_SERVICE
+          value: "momentum"
+        - name: MCP_PORT
+          value: "10100"
+        - name: MCP_HOST
+          value: "0.0.0.0"
+        - name: MCP_TRANSPORT
+          value: "streamable_http"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          tcpSocket:
+            port: 10100
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: 10100
+          initialDelaySeconds: 10
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-momentum-service
+  namespace: physics-assistant
+spec:
+  selector:
+    app: mcp-momentum
+  ports:
+  - port: 10100
+    targetPort: 10100
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-angular-motion
+  namespace: physics-assistant
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mcp-angular-motion
+  template:
+    metadata:
+      labels:
+        app: mcp-angular-motion
+    spec:
+      imagePullSecrets:
+      - name: container-registry-secret
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+      - name: mcp-angular-motion
+        image: physics-assistant/mcp-tools:latest
+        ports:
+        - containerPort: 10100
+        env:
+        - name: MCP_SERVICE
+          value: "angular-motion"
+        - name: MCP_PORT
+          value: "10100"
+        - name: MCP_HOST
+          value: "0.0.0.0"
+        - name: MCP_TRANSPORT
+          value: "streamable_http"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          tcpSocket:
+            port: 10100
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: 10100
+          initialDelaySeconds: 10
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-angular-motion-service
+  namespace: physics-assistant
+spec:
+  selector:
+    app: mcp-angular-motion
+  ports:
+  - port: 10100
+    targetPort: 10100

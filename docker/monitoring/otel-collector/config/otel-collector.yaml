@@ -1,0 +1,277 @@
+# OpenTelemetry Collector Configuration for Physics Assistant
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  
+  pprof:
+    endpoint: 0.0.0.0:1777
+  
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+receivers:
+  # OTLP receiver for modern instrumentation
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+        cors:
+          allowed_origins:
+            - "https://physics-assistant.local"
+            - "http://localhost:*"
+  
+  # Jaeger receiver for legacy compatibility
+  jaeger:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:14250
+      thrift_http:
+        endpoint: 0.0.0.0:14268
+  
+  # Zipkin receiver
+  zipkin:
+    endpoint: 0.0.0.0:9411
+  
+  # Prometheus receiver for metrics
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'otel-collector'
+          scrape_interval: 30s
+          static_configs:
+            - targets: ['localhost:8888']
+        
+        - job_name: 'physics-apis'
+          scrape_interval: 15s
+          static_configs:
+            - targets:
+              - 'physics-agents-api:8000'
+              - 'physics-database-api:8001'
+              - 'physics-dashboard-api:8002'
+          metrics_path: '/metrics'
+        
+        - job_name: 'physics-databases'
+          scrape_interval: 30s
+          static_configs:
+            - targets:
+              - 'postgres-exporter:9187'
+              - 'redis-exporter:9121'
+              - 'neo4j:2004'
+        
+        - job_name: 'physics-infrastructure'
+          scrape_interval: 30s
+          static_configs:
+            - targets:
+              - 'node-exporter:9100'
+              - 'cadvisor:8080'
+              - 'nginx-exporter:9113'
+
+processors:
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    limit_mib: 512
+    spike_limit_mib: 128
+    check_interval: 5s
+  
+  # Batch processor for better performance
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+  
+  # Resource processor to add consistent labels
+  resource:
+    attributes:
+      - key: service.namespace
+        value: "physics-assistant"
+        action: upsert
+      - key: deployment.environment
+        value: "production"
+        action: upsert
+      - key: service.version
+        from_attribute: service_version
+        action: upsert
+  
+  # Probabilistic sampler for trace volume control
+  probabilistic_sampler:
+    sampling_percentage: 10.0
+  
+  # Tail sampling for intelligent trace selection
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 10000
+    expected_new_traces_per_sec: 100
+    policies:
+      # Always sample errors
+      - name: error_policy
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+      
+      # Sample slow operations
+      - name: slow_operations
+        type: latency
+        latency:
+          threshold_ms: 1000
+      
+      # Sample specific services at higher rate
+      - name: physics_agents_high_sampling
+        type: and
+        and:
+          and_sub_policy:
+            - name: service_name_policy
+              type: string_attribute
+              string_attribute:
+                key: service.name
+                values: ["physics-agents-api"]
+            - name: probabilistic_policy
+              type: probabilistic
+              probabilistic:
+                sampling_percentage: 50.0
+      
+      # Default probabilistic sampling
+      - name: default_probabilistic
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 5.0
+  
+  # Span processor for enrichment
+  span:
+    name:
+      from_attributes: [http.method, http.route]
+      separator: " "
+    status:
+      set_code: true
+  
+  # Attributes processor for data enrichment
+  attributes:
+    actions:
+      # Add Physics Assistant specific attributes
+      - key: physics.component
+        from_attribute: http.route
+        action: upsert
+      
+      # Normalize service names
+      - key: service.name
+        value: "physics-assistant"
+        action: upsert
+        
+      # Add correlation IDs for tracking
+      - key: physics.correlation_id
+        from_attribute: http.request.header.x-correlation-id
+        action: upsert
+  
+  # Filter processor to remove noisy spans
+  filter:
+    traces:
+      span:
+        - 'name == "health-check"'
+        - 'name == "metrics"'
+        - 'attributes["http.route"] == "/health"'
+        - 'attributes["http.route"] == "/metrics"'
+
+exporters:
+  # Jaeger exporter for trace storage
+  jaeger:
+    endpoint: jaeger:14250
+    tls:
+      insecure: true
+  
+  # Prometheus exporter for metrics
+  prometheus:
+    endpoint: "0.0.0.0:8888"
+    const_labels:
+      cluster: "physics-assistant"
+      environment: "production"
+  
+  # Prometheus remote write for external systems
+  prometheusremotewrite:
+    endpoint: http://prometheus:9090/api/v1/write
+    headers:
+      X-Prometheus-Remote-Write-Version: "0.1.0"
+    tls:
+      insecure: true
+  
+  # Elasticsearch exporter for trace analysis
+  elasticsearch:
+    endpoint: http://elasticsearch:9200
+    index: "otel-traces"
+    pipeline: "otel-pipeline"
+    auth:
+      username: "${ELASTICSEARCH_USERNAME}"
+      password: "${ELASTICSEARCH_PASSWORD}"
+    mapping:
+      mode: "ecs"
+      dedot: true
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 60s
+      max_elapsed_time: 300s
+  
+  # Loki exporter for logs
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+    headers:
+      X-Scope-OrgID: "physics-assistant"
+    labels:
+      environment: "production"
+      cluster: "physics-assistant"
+  
+  # OTLP exporter for forwarding to other collectors
+  otlp:
+    endpoint: http://downstream-collector:4317
+    tls:
+      insecure: true
+    headers:
+      X-Physics-Assistant: "true"
+  
+  # Debug exporter for troubleshooting
+  debug:
+    verbosity: normal
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+service:
+  extensions: [health_check, pprof, zpages]
+  
+  pipelines:
+    # Traces pipeline
+    traces:
+      receivers: [otlp, jaeger, zipkin]
+      processors: [memory_limiter, resource, span, attributes, tail_sampling, batch]
+      exporters: [jaeger, elasticsearch, debug]
+    
+    # Metrics pipeline
+    metrics:
+      receivers: [otlp, prometheus]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheus, prometheusremotewrite]
+    
+    # Logs pipeline
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, attributes, batch]
+      exporters: [loki, elasticsearch, debug]
+  
+  telemetry:
+    logs:
+      level: "info"
+      development: false
+      sampling:
+        initial: 10
+        thereafter: 100
+      output_paths: ["stdout"]
+      error_output_paths: ["stderr"]
+    
+    metrics:
+      level: "detailed"
+      address: "0.0.0.0:8888"
+    
+    resource:
+      service.name: "otel-collector"
+      service.version: "0.90.1"
+      service.namespace: "physics-assistant"

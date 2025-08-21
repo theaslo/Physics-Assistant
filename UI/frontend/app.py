@@ -4,7 +4,7 @@ from config import Config, PHYSICS_CONSTANTS
 from components.auth import AuthManager
 from components.chat import ChatInterface
 from components.agents import AgentManager
-from services.data_manager import SessionDataManager
+from services.database_client import get_data_manager
 
 def initialize_session_state():
     """Initialize session state variables"""
@@ -33,7 +33,7 @@ def main():
     
     # Initialize managers
     auth_manager = AuthManager()
-    session_manager = SessionDataManager()
+    session_manager = get_data_manager(Config.DATABASE_API_URL)
     
     # Check authentication status
     if st.session_state['authentication_status'] is None:
