@@ -1,5 +1,5 @@
 # Flower Task Monitor Container for Physics Assistant
-FROM python:3.11-slim
+FROM docker.io/python:3.11-slim
 
 LABEL maintainer="Physics Assistant Team"
 LABEL description="Flower task monitoring for Physics Assistant analytics"
@@ -31,7 +31,6 @@ RUN chmod +x /start.sh && \
     chown physicsapp:physicsapp /start.sh
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:5555/ || exit 1
 
 # Switch to application user

@@ -1,6 +1,6 @@
 # Multi-stage build for MCP Physics Tools
 # Build stage
-FROM python:3.11-slim AS builder
+FROM docker.io/python:3.11-slim AS builder
 
 LABEL maintainer="Physics Assistant Team"
 LABEL description="MCP Physics Tools servers for Physics Assistant platform"
@@ -34,7 +34,7 @@ WORKDIR /app/mcp_tools
 RUN uv sync --no-dev --frozen
 
 # Production stage
-FROM python:3.11-slim AS production
+FROM docker.io/python:3.11-slim AS production
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -72,7 +72,6 @@ RUN chmod +x /app/start.sh && \
     chown mcp:mcp /app/start.sh
 
 # Health check (will be customized per service)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:10100/health || nc -z localhost 10100 || exit 1
 
 # Switch to non-root user

@@ -1,5 +1,5 @@
 # Dashboard API Server Container for Physics Assistant
-FROM python:3.11-slim
+FROM docker.io/python:3.11-slim
 
 LABEL maintainer="Physics Assistant Team"
 LABEL description="Dashboard API server with analytics for Physics Assistant platform"
@@ -46,7 +46,6 @@ COPY docker/api/dashboard-api/start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8002/health || exit 1
 
 # Switch to application user

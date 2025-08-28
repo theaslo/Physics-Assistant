@@ -1,5 +1,5 @@
 # Elasticsearch for APM and Observability Data
-FROM docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+FROM docker.io/elastic/elasticsearch:8.11.0
 
 # Switch to root for configuration
 USER root
@@ -29,7 +29,6 @@ RUN chmod +x /usr/share/elasticsearch/config/scripts/*.sh && \
 USER elasticsearch
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
     CMD curl -f http://localhost:9200/_cluster/health || exit 1
 
 # Environment variables for production

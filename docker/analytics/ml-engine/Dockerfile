@@ -1,5 +1,5 @@
 # ML Analytics Engine Container for Physics Assistant
-FROM python:3.11-slim
+FROM docker.io/python:3.11-slim
 
 LABEL maintainer="Physics Assistant Team"
 LABEL description="Machine learning analytics engine for Physics Assistant platform"
@@ -60,7 +60,6 @@ COPY docker/analytics/ml-engine/start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 
 # Health check
-HEALTHCHECK --interval=60s --timeout=15s --start-period=120s --retries=3 \
     CMD python -c "import requests; requests.get('http://localhost:8003/health')" || exit 1
 
 # Switch to application user

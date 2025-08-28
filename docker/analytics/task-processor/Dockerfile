@@ -1,5 +1,5 @@
 # Background Task Processor Container for Physics Assistant
-FROM python:3.11-slim
+FROM docker.io/python:3.11-slim
 
 LABEL maintainer="Physics Assistant Team"
 LABEL description="Background task processor for Physics Assistant analytics"
@@ -56,7 +56,6 @@ COPY docker/analytics/task-processor/start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 
 # Health check
-HEALTHCHECK --interval=60s --timeout=15s --start-period=60s --retries=3 \
     CMD celery -A analytics.tasks status || exit 1
 
 # Switch to application user

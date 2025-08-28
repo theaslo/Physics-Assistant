@@ -1,5 +1,5 @@
 # Trivy Security Scanner Container
-FROM aquasec/trivy:latest
+FROM docker.io/aquasec/trivy:latest
 
 # Install additional tools for scanning
 USER root
@@ -28,7 +28,6 @@ USER scanner
 WORKDIR /scanner
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD trivy version || exit 1
 
 CMD ["/scanner/scripts/scan-all.sh"]

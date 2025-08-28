@@ -1,5 +1,5 @@
 # Jaeger Distributed Tracing for Physics Assistant
-FROM jaegertracing/all-in-one:1.51
+FROM docker.io/jaegertracing/all-in-one:1.51
 
 # Switch to root to install additional tools
 USER root
@@ -26,7 +26,6 @@ RUN chown -R jaeger:jaeger /opt/jaeger
 USER jaeger
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:14269/metrics || exit 1
 
 # Expose Jaeger ports

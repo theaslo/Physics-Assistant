@@ -6,7 +6,7 @@ import { saveAs } from 'file-saver';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
-import { StudentInsights, ClassOverview, ExportFormat } from '../types/api';
+import type { StudentInsights, ClassOverview, ExportFormat } from '../types/api';
 
 /**
  * Export student data to various formats

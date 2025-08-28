@@ -1,5 +1,5 @@
 # Neo4j Container for Physics Assistant Knowledge Graph
-FROM neo4j:5.15-enterprise
+FROM docker.io/neo4j:5.15-community
 
 LABEL maintainer="Physics Assistant Team"
 LABEL description="Neo4j knowledge graph database for Physics Assistant platform"
@@ -40,7 +40,6 @@ RUN mkdir -p /var/lib/neo4j/backups /var/log/neo4j && \
     chown -R neo4j:neo4j /var/lib/neo4j/backups /var/log/neo4j
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD curl -f http://localhost:7474/db/data/ || exit 1
 
 # Switch back to neo4j user
@@ -52,7 +51,7 @@ EXPOSE 7474 7687
 # Environment variables
 ENV NEO4J_AUTH=neo4j/physics_assistant_2024
 ENV NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
-ENV NEO4J_PLUGINS=["apoc", "graph-data-science"]
+ENV NEO4J_PLUGINS='["apoc", "graph-data-science"]'
 
 # Volume for data persistence
 VOLUME ["/data", "/logs", "/import", "/plugins"]

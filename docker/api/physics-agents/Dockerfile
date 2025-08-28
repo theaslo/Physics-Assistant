@@ -1,5 +1,5 @@
 # Physics Agents API Container for Physics Assistant
-FROM python:3.11-slim
+FROM docker.io/python:3.11-slim
 
 LABEL maintainer="Physics Assistant Team"
 LABEL description="Physics agents API server with MCP tools integration"
@@ -55,7 +55,6 @@ COPY docker/api/physics-agents/start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Switch to application user

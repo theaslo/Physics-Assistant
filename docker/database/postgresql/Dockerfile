@@ -1,5 +1,5 @@
 # PostgreSQL Container for Physics Assistant
-FROM postgres:16-alpine
+FROM docker.io/postgres:16-alpine
 
 LABEL maintainer="Physics Assistant Team"
 LABEL description="PostgreSQL database for Physics Assistant platform"
@@ -31,7 +31,6 @@ COPY docker/database/postgresql/postgresql.conf /etc/postgresql/postgresql.conf
 COPY docker/database/postgresql/pg_hba.conf /etc/postgresql/pg_hba.conf
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD pg_isready -U $POSTGRES_USER -d $POSTGRES_DB || exit 1
 
 # Expose port

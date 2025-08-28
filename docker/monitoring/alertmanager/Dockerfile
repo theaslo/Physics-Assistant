@@ -1,19 +1,19 @@
 # Alertmanager Container for Physics Assistant Notifications
-FROM prom/alertmanager:latest
+FROM docker.io/prom/alertmanager:latest
 
 LABEL maintainer="Physics Assistant Team"
 LABEL description="Alertmanager for Physics Assistant platform notifications"
 
 USER root
 
-# Install additional tools
-RUN apk add --no-cache \
-    curl \
-    && rm -rf /var/cache/apk/*
-
-# Create application user
-RUN addgroup -g 1001 physicsapp && \
-    adduser -D -u 1001 -G physicsapp physicsapp
+# Create physicsapp user
+RUN if command -v addgroup >/dev/null; then \
+        addgroup -g 1001 physicsapp && \
+        adduser -D -u 1001 -G physicsapp physicsapp; \
+    else \
+        groupadd -g 1001 physicsapp && \
+        useradd -r -u 1001 -g physicsapp physicsapp; \
+    fi
 
 # Copy Alertmanager configuration
 COPY docker/monitoring/alertmanager/alertmanager.yml /etc/alertmanager/alertmanager.yml
@@ -23,8 +23,7 @@ RUN mkdir -p /alertmanager/data && \
     chown -R physicsapp:physicsapp /alertmanager /etc/alertmanager
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:9093/-/healthy || exit 1
+# CMD curl -f http://localhost:9093/-/healthy || exit 1
 
 # Switch to application user
 USER physicsapp

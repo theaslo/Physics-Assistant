@@ -3,7 +3,8 @@
  * Provides light and dark themes with custom colors and typography
  */
 
-import { createTheme, ThemeOptions } from '@mui/material/styles';
+import { createTheme } from '@mui/material/styles';
+import type { ThemeOptions } from '@mui/material/styles';
 import { alpha } from '@mui/material/styles';
 
 // ============================================================================
@@ -250,7 +251,7 @@ const getComponentOverrides = (isDark: boolean) => ({
     styleOverrides: {
       root: {
         borderRadius: 8,
-        textTransform: 'none',
+        textTransform: 'none' as const,
         fontWeight: 500,
       },
       contained: {

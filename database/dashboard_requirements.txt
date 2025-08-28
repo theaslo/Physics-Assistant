@@ -32,7 +32,7 @@ psutil>=5.9.0
 
 # Data export formats
 openpyxl>=3.1.0
-xlswriter>=3.1.0
+XlsxWriter>=3.1.0
 
 # HTTP client for external APIs
 httpx>=0.25.0
@@ -48,7 +48,6 @@ celery>=5.3.0
 kombu>=5.3.0
 
 # Compression and performance
-python-gzip>=1.0
 brotli>=1.1.0
 
 # Date and time handling
@@ -65,4 +64,3 @@ slowapi>=0.1.9
 pytest>=7.4.0
 pytest-asyncio>=0.21.0
 pytest-mock>=3.12.0
-httpx>=0.25.0  # For testing

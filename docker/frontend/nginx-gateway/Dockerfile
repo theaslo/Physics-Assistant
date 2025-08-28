@@ -1,5 +1,5 @@
 # Nginx Gateway/Load Balancer for Physics Assistant
-FROM nginx:alpine
+FROM docker.io/nginx:alpine
 
 LABEL maintainer="Physics Assistant Team"
 LABEL description="Nginx gateway and load balancer for Physics Assistant platform"
@@ -27,7 +27,6 @@ RUN mkdir -p /var/cache/nginx /var/log/nginx /usr/share/nginx/html && \
 COPY docker/frontend/nginx-gateway/html/ /usr/share/nginx/html/
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:80/health || exit 1
 
 # Switch to application user

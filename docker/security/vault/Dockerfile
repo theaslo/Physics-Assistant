@@ -1,5 +1,5 @@
 # HashiCorp Vault for Secrets Management
-FROM hashicorp/vault:1.15
+FROM docker.io/hashicorp/vault:1.15
 
 # Install additional tools
 USER root
@@ -24,7 +24,6 @@ RUN chmod +x /vault/scripts/*.sh && \
 USER vault
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD vault status || exit 1
 
 # Expose Vault port

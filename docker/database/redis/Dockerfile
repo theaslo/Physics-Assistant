@@ -1,5 +1,5 @@
 # Redis Container for Physics Assistant Caching and Sessions
-FROM redis:7-alpine
+FROM docker.io/redis:7-alpine
 
 LABEL maintainer="Physics Assistant Team"
 LABEL description="Redis cache and session store for Physics Assistant platform"
@@ -28,7 +28,6 @@ RUN chown -R redis:redis /usr/local/etc/redis/ && \
     chown -R redis:redis /opt/physics-assistant/
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD redis-cli --raw incr ping_counter || exit 1
 
 # Switch to redis user

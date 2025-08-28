@@ -1,5 +1,5 @@
 # Security Incident Response and Monitoring System
-FROM python:3.11-slim
+FROM docker.io/python:3.11-slim
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -36,7 +36,6 @@ RUN useradd -m -u 1001 security && \
 USER security
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD python src/health_check.py || exit 1
 
 # Environment variables

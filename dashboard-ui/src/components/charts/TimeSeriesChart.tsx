@@ -37,7 +37,7 @@ import {
   Download as DownloadIcon,
 } from '@mui/icons-material';
 
-import { TimeSeriesDataPoint, MetricType } from '../../types/api';
+import type { TimeSeriesDataPoint, MetricType } from '../../types/api';
 import { getChartColor } from '../../themes/dashboard-theme';
 
 // ============================================================================

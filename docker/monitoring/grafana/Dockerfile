@@ -1,5 +1,5 @@
 # Grafana Container for Physics Assistant Visualization
-FROM grafana/grafana:latest
+FROM docker.io/grafana/grafana:latest
 
 LABEL maintainer="Physics Assistant Team"
 LABEL description="Grafana dashboards for Physics Assistant platform"
@@ -25,7 +25,6 @@ RUN mkdir -p /var/lib/grafana/plugins /var/log/grafana && \
     chown -R physicsapp:physicsapp /var/lib/grafana /var/log/grafana /etc/grafana
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:3000/api/health || exit 1
 
 # Switch to application user

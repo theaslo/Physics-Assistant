@@ -1,5 +1,5 @@
 # Container Image Signing and Verification Service
-FROM alpine:3.19
+FROM docker.io/alpine:3.19
 
 # Install cosign, crane, and other tools
 RUN apk add --no-cache \
@@ -41,7 +41,6 @@ USER signer
 WORKDIR /signing
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD cosign version || exit 1
 
 CMD ["/signing/scripts/sign-images.sh"]

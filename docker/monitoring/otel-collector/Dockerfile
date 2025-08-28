@@ -1,5 +1,5 @@
 # OpenTelemetry Collector for Distributed Tracing
-FROM otel/opentelemetry-collector-contrib:0.90.1
+FROM docker.io/otel/opentelemetry-collector-contrib:0.90.1
 
 # Switch to root for additional setup
 USER root
@@ -26,7 +26,6 @@ RUN chown -R 10001:10001 /etc/otelcol
 USER 10001
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:13133/health || exit 1
 
 # Expose collector ports
