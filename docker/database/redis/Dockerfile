@@ -28,6 +28,7 @@ RUN chown -R redis:redis /usr/local/etc/redis/ && \
     chown -R redis:redis /opt/physics-assistant/
 
 # Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD redis-cli --raw incr ping_counter || exit 1
 
 # Switch to redis user

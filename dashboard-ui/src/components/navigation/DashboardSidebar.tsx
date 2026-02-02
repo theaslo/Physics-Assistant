@@ -123,7 +123,7 @@ const navigationItems: NavigationItem[] = [
       {
         id: 'concepts',
         label: 'Concept Mastery',
-        icon: <Assessment as any />,
+        icon: <ReportsIcon />,
         path: '/students/concepts',
       },
     ],
@@ -143,7 +143,7 @@ const navigationItems: NavigationItem[] = [
       {
         id: 'performance',
         label: 'Class Performance',
-        icon: <BarChart as any />,
+        icon: <ChartIcon />,
         path: '/classes/performance',
       },
     ],
@@ -157,7 +157,7 @@ const navigationItems: NavigationItem[] = [
       {
         id: 'generate',
         label: 'Generate Reports',
-        icon: <Assessment as any />,
+        icon: <ReportsIcon />,
         path: '/reports/generate',
       },
       {

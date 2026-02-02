@@ -13,13 +13,14 @@ from physics_mcp_tools.kinematics_utils import (
     format_time,
     safe_format
 )
+from physics_mcp_tools.database_logger import DatabaseLogger, create_tool_wrapper
 import uvicorn
 import argparse
 NAME= "kinematics_mcp_server"
 
 logger = get_logger(__name__)
 
-def serve(host, port, transport):  
+def serve(host, port, transport):
     """Initializes and runs the Agent Cards MCP server.
 
     Args:
@@ -28,8 +29,20 @@ def serve(host, port, transport):
         transport: The transport mechanism for the MCP server (e.g., 'stdio', 'sse').
     """
     logger.info('Starting Kinematics MCP Server')
-    
+
     mcp = FastMCP(NAME, stateless_http=False)
+
+    # Initialize database logger
+    db_logger = DatabaseLogger("kinematics")
+
+    # Test database connection on startup
+    async def test_db_connection():
+        connected = await db_logger.test_connection()
+        if connected:
+            await db_logger.log_server_status("starting", {"port": port, "host": host})
+            logger.info("Database logging enabled for Kinematics MCP server")
+        else:
+            logger.warning("Database API not available - running without logging")
 
 
 

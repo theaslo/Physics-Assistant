@@ -30,7 +30,7 @@ class DashboardAPIClient {
   private baseURL: string;
   private defaultTimeout: number = 30000; // 30 seconds
 
-  constructor(baseURL: string = 'http://localhost:8002', options?: AxiosRequestConfig) {
+  constructor(baseURL: string = '/api', options?: AxiosRequestConfig) {
     this.baseURL = baseURL;
     
     this.api = axios.create({

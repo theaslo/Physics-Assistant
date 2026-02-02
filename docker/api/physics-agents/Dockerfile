@@ -1,5 +1,5 @@
 # Physics Agents API Container for Physics Assistant
-FROM docker.io/python:3.11-slim
+FROM docker.io/python:3.12-slim
 
 LABEL maintainer="Physics Assistant Team"
 LABEL description="Physics agents API server with MCP tools integration"
@@ -8,6 +8,8 @@ LABEL description="Physics agents API server with MCP tools integration"
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
+ENV UV_PYTHON_PREFERENCE=only-system
+ENV UV_PYTHON=python3.12
 
 # Install system dependencies including UV
 RUN apt-get update && apt-get install -y \
@@ -51,10 +53,11 @@ RUN mkdir -p /app/logs /app/temp && \
     chown -R physicsapp:physicsapp /app
 
 # Copy startup script
-COPY docker/api/physics-agents/start.sh /app/start.sh
-RUN chmod +x /app/start.sh
+COPY --chmod=755 docker/api/physics-agents/start.sh /app/start.sh
+RUN chown physicsapp:physicsapp /app/start.sh
 
 # Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Switch to application user

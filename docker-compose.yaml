@@ -96,7 +96,7 @@ services:
       - mcp-network
 
   #Angular Motion MCP Server
-  mcp-energy:
+  mcp-angular-motion:
     build:
       context: .
       dockerfile: Docker/Dockerfile

@@ -11,7 +11,9 @@ WORKDIR /app
 COPY dashboard-ui/package*.json ./
 
 # Install dependencies (including dev deps for build)
-RUN npm install
+# Split into two steps to work around Podman ETXTBSY bug with esbuild
+RUN npm install --ignore-scripts
+RUN npm rebuild esbuild
 
 # Copy source code
 COPY dashboard-ui/ ./
@@ -42,6 +44,7 @@ RUN mkdir -p /var/cache/nginx /var/log/nginx && \
     chmod -R 755 /usr/share/nginx/html
 
 # Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:80/ || exit 1
 
 # Expose port

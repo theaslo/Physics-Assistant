@@ -46,9 +46,11 @@ RUN mkdir -p /app/logs /app/uploads /app/temp && \
 # Copy configuration and startup script
 COPY docker/frontend/streamlit-ui/streamlit_config.toml /app/.streamlit/config.toml
 COPY docker/frontend/streamlit-ui/start.sh /app/start.sh
-RUN chmod +x /app/start.sh
+RUN chmod +x /app/start.sh && \
+    chown physicsapp:physicsapp /app/start.sh
 
 # Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8501/_stcore/health || exit 1
 
 # Switch to application user

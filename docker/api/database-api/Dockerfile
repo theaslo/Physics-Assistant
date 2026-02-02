@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y \
     libffi-dev \
     libssl-dev \
     build-essential \
+    netcat-traditional \
     && rm -rf /var/lib/apt/lists/*
 
 # Create application user
@@ -43,9 +44,10 @@ RUN mkdir -p /app/logs /app/backups && \
 
 # Copy startup script
 COPY docker/api/database-api/start.sh /app/start.sh
-RUN chmod +x /app/start.sh
+RUN chmod +x /app/start.sh && chown physicsapp:physicsapp /app/start.sh
 
 # Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8001/health || exit 1
 
 # Switch to application user

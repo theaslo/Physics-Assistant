@@ -21,7 +21,7 @@ echo "Redis is ready!"
 
 # Wait for Neo4j to be ready
 echo "Waiting for Neo4j to be ready..."
-while ! curl -f -s http://${NEO4J_HOST:-neo4j}:${NEO4J_HTTP_PORT:-7474}/db/data/ > /dev/null; do
+while ! curl -f -s http://${NEO4J_HOST:-neo4j}:${NEO4J_HTTP_PORT:-7474} > /dev/null; do
     echo "Neo4j is not ready yet..."
     sleep 5
 done
@@ -37,4 +37,5 @@ echo "Database API is ready!"
 
 # Start the Dashboard API server
 echo "Starting Dashboard API server on port 8002..."
+cd /app/database
 exec python dashboard_api_server.py

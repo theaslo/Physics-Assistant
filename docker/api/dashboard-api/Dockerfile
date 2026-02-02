@@ -42,10 +42,11 @@ RUN mkdir -p /app/logs /app/exports && \
     chown -R physicsapp:physicsapp /app
 
 # Copy startup script
-COPY docker/api/dashboard-api/start.sh /app/start.sh
-RUN chmod +x /app/start.sh
+COPY --chmod=755 docker/api/dashboard-api/start.sh /app/start.sh
+RUN chown physicsapp:physicsapp /app/start.sh
 
 # Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8002/health || exit 1
 
 # Switch to application user

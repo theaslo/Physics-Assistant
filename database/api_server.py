@@ -20,6 +20,10 @@ import time
 
 from db_manager import DatabaseManager, get_db_manager
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Import analytics modules
 try:
     from analytics.learning_analytics import LearningAnalyticsEngine, StudentProfile
@@ -31,10 +35,6 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Analytics modules not available: {e}")
     ANALYTICS_AVAILABLE = False
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # Prometheus metrics
 REQUEST_COUNT = Counter(
@@ -108,11 +108,11 @@ async def get_metrics():
 
 # Global database manager and analytics engines
 db_manager: Optional[DatabaseManager] = None
-analytics_engine: Optional[LearningAnalyticsEngine] = None
-mastery_detector: Optional[ConceptMasteryDetector] = None
-path_optimizer: Optional[LearningPathOptimizer] = None
-data_miner: Optional[EducationalDataMiner] = None
-realtime_engine: Optional[RealTimeAnalyticsEngine] = None
+analytics_engine: Optional[Any] = None
+mastery_detector: Optional[Any] = None
+path_optimizer: Optional[Any] = None
+data_miner: Optional[Any] = None
+realtime_engine: Optional[Any] = None
 
 # Pydantic models for request/response validation
 
@@ -171,7 +171,7 @@ class LearningPathRequest(BaseModel):
     user_id: str
     target_concepts: List[str]
     time_constraint: Optional[float] = None  # hours
-    difficulty_preference: str = Field(default="adaptive", regex="^(easy|moderate|challenging|adaptive)$")
+    difficulty_preference: str = Field(default="adaptive", pattern="^(easy|moderate|challenging|adaptive)$")
     algorithm: str = Field(default="personalized_optimal")
 
 class AnalyticsInsightRequest(BaseModel):
@@ -182,7 +182,7 @@ class AnalyticsInsightRequest(BaseModel):
 
 class StudentClusteringRequest(BaseModel):
     """Request for student clustering analysis"""
-    algorithm: str = Field(default="kmeans", regex="^(kmeans|dbscan|hierarchical)$")
+    algorithm: str = Field(default="kmeans", pattern="^(kmeans|dbscan|hierarchical)$")
     features: List[str] = Field(default=["success_rate", "engagement", "learning_velocity"])
 
 class RealTimeMetricsRequest(BaseModel):
@@ -1303,9 +1303,8 @@ async def internal_error_handler(request: Request, exc: HTTPException):
 # Main entry point
 if __name__ == "__main__":
     uvicorn.run(
-        "api_server:app",
+        app,
         host="0.0.0.0",
-        port=8000,
-        log_level="info",
-        reload=True  # Set to False in production
+        port=8001,
+        log_level="info"
     )

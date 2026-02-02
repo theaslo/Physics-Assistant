@@ -21,25 +21,25 @@ echo "Starting MCP $MCP_SERVICE server on $MCP_HOST:$MCP_PORT with transport $MC
 # Start the appropriate MCP server
 case $MCP_SERVICE in
     "forces")
-        exec uv run physics-mcp --run forces-server --host $MCP_HOST --port $MCP_PORT --transport $MCP_TRANSPORT
+        cd /app/mcp_tools && exec python -m physics_mcp_tools --run forces-server --host $MCP_HOST --port $MCP_PORT --transport $MCP_TRANSPORT
         ;;
     "kinematics")
-        exec uv run physics-mcp --run kinematics-server --host $MCP_HOST --port $MCP_PORT --transport $MCP_TRANSPORT
+        cd /app/mcp_tools && exec python -m physics_mcp_tools --run kinematics-server --host $MCP_HOST --port $MCP_PORT --transport $MCP_TRANSPORT
         ;;
     "math")
-        exec uv run physics-mcp --run math-server --host $MCP_HOST --port $MCP_PORT --transport $MCP_TRANSPORT
+        cd /app/mcp_tools && exec python -m physics_mcp_tools --run math-server --host $MCP_HOST --port $MCP_PORT --transport $MCP_TRANSPORT
         ;;
     "energy")
-        exec uv run physics-mcp --run energy-server --host $MCP_HOST --port $MCP_PORT --transport $MCP_TRANSPORT
+        cd /app/mcp_tools && exec python -m physics_mcp_tools --run energy-server --host $MCP_HOST --port $MCP_PORT --transport $MCP_TRANSPORT
         ;;
     "momentum")
-        exec uv run physics-mcp --run momentum-server --host $MCP_HOST --port $MCP_PORT --transport $MCP_TRANSPORT
+        cd /app/mcp_tools && exec python -m physics_mcp_tools --run momentum-server --host $MCP_HOST --port $MCP_PORT --transport $MCP_TRANSPORT
         ;;
     "angular-motion")
-        exec uv run physics-mcp --run angular-motion-server --host $MCP_HOST --port $MCP_PORT --transport $MCP_TRANSPORT
+        cd /app/mcp_tools && exec python -m physics_mcp_tools --run angular-motion-server --host $MCP_HOST --port $MCP_PORT --transport $MCP_TRANSPORT
         ;;
     "circuit")
-        exec uv run physics-mcp --run circuit-server --host $MCP_HOST --port $MCP_PORT --transport $MCP_TRANSPORT
+        cd /app/mcp_tools && exec python -m physics_mcp_tools --run circuit-server --host $MCP_HOST --port $MCP_PORT --transport $MCP_TRANSPORT
         ;;
     *)
         echo "Unknown MCP service: $MCP_SERVICE"

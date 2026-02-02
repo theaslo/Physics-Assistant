@@ -19,8 +19,8 @@ COPY docker/database/postgresql/init/ /docker-entrypoint-initdb.d/
 COPY database/schema/ /opt/physics-assistant/schema/
 
 # Set proper permissions
-RUN chmod +x /docker-entrypoint-initdb.d/*.sh && \
-    chown -R postgres:postgres /opt/physics-assistant/
+RUN chmod 755 /docker-entrypoint-initdb.d/*.sh && \
+    chown -R postgres:postgres /docker-entrypoint-initdb.d/ /opt/physics-assistant/
 
 # Create directories for backups and logs
 RUN mkdir -p /var/lib/postgresql/backups /var/log/postgresql && \
@@ -31,6 +31,7 @@ COPY docker/database/postgresql/postgresql.conf /etc/postgresql/postgresql.conf
 COPY docker/database/postgresql/pg_hba.conf /etc/postgresql/pg_hba.conf
 
 # Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD pg_isready -U $POSTGRES_USER -d $POSTGRES_DB || exit 1
 
 # Expose port

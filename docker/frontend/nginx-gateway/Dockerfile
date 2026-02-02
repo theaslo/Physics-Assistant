@@ -27,6 +27,7 @@ RUN mkdir -p /var/cache/nginx /var/log/nginx /usr/share/nginx/html && \
 COPY docker/frontend/nginx-gateway/html/ /usr/share/nginx/html/
 
 # Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:80/health || exit 1
 
 # Switch to application user

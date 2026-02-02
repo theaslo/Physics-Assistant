@@ -186,6 +186,9 @@ class AuthManager:
                 # Remove password from returned user info
                 user_info = {k: v for k, v in user_data.items() if k != 'password'}
                 user_info['username'] = username
+                # Generate a consistent unique ID for database logging
+                import hashlib
+                user_info['id'] = hashlib.sha256(f"{username}_{user_data['email']}".encode()).hexdigest()[:16]
                 return True, user_info
         return False, None
     

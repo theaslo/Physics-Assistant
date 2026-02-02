@@ -7,6 +7,7 @@ with advanced caching, data aggregation, and real-time streaming capabilities.
 
 import asyncio
 import json
+import os
 import uuid
 import hashlib
 import time
@@ -14,11 +15,11 @@ import gzip
 import pickle
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Union, Set
+from typing import Dict, List, Optional, Any, Union, Set, Tuple
 from concurrent.futures import ThreadPoolExecutor
 import logging
 
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Request, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
@@ -36,41 +37,54 @@ from db_manager import DatabaseManager, get_db_manager
 from api_server import analytics_engine, mastery_detector, path_optimizer, data_miner, realtime_engine
 
 # Import advanced analytics engines
-from analytics.predictive_analytics import PredictiveAnalyticsEngine
-from analytics.comparative_analytics import ComparativeAnalyticsEngine
-from analytics.content_effectiveness import ContentEffectivenessEngine
-from analytics.statistical_analysis import StatisticalAnalysisEngine
-from analytics.automated_insights import AutomatedInsightsEngine
+try:
+    from analytics.predictive_analytics import PredictiveAnalyticsEngine
+    from analytics.comparative_analytics import ComparativeAnalyticsEngine
+    from analytics.content_effectiveness import ContentEffectivenessEngine
+    from analytics.statistical_analysis import StatisticalAnalysisEngine
+    from analytics.automated_insights import AutomatedInsightsEngine
+    ADVANCED_ANALYTICS_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"Advanced analytics modules not available: {e}")
+    ADVANCED_ANALYTICS_AVAILABLE = False
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Prometheus metrics for dashboard API
-DASHBOARD_REQUEST_COUNT = Counter(
-    'dashboard_requests_total',
-    'Total dashboard API requests',
-    ['endpoint', 'cache_status']
-)
-DASHBOARD_RESPONSE_TIME = Histogram(
-    'dashboard_response_seconds',
-    'Dashboard API response time',
-    ['endpoint', 'data_type']
-)
-CACHE_HIT_RATE = Gauge(
-    'dashboard_cache_hit_rate',
-    'Dashboard cache hit rate',
-    ['cache_layer']
-)
-ACTIVE_WEBSOCKETS = Gauge(
-    'dashboard_websockets_active',
-    'Active WebSocket connections'
-)
-DATA_AGGREGATION_TIME = Histogram(
-    'dashboard_aggregation_seconds',
-    'Time spent on data aggregation',
-    ['aggregation_type']
-)
+from prometheus_client import CollectorRegistry, REGISTRY
+try:
+    DASHBOARD_REQUEST_COUNT = Counter(
+        'dashboard_requests_total',
+        'Total dashboard API requests',
+        ['endpoint', 'cache_status']
+    )
+    DASHBOARD_RESPONSE_TIME = Histogram(
+        'dashboard_response_seconds',
+        'Dashboard API response time',
+        ['endpoint', 'data_type']
+    )
+    CACHE_HIT_RATE = Gauge(
+        'dashboard_cache_hit_rate',
+        'Dashboard cache hit rate',
+        ['cache_layer']
+    )
+    ACTIVE_WEBSOCKETS = Gauge(
+        'dashboard_websockets_active',
+        'Active WebSocket connections'
+    )
+    DATA_AGGREGATION_TIME = Histogram(
+        'dashboard_aggregation_seconds',
+        'Time spent on data aggregation',
+        ['aggregation_type']
+    )
+except ValueError:
+    DASHBOARD_REQUEST_COUNT = REGISTRY._names_to_collectors.get('dashboard_requests_total')
+    DASHBOARD_RESPONSE_TIME = REGISTRY._names_to_collectors.get('dashboard_response_seconds')
+    CACHE_HIT_RATE = REGISTRY._names_to_collectors.get('dashboard_cache_hit_rate')
+    ACTIVE_WEBSOCKETS = REGISTRY._names_to_collectors.get('dashboard_websockets_active')
+    DATA_AGGREGATION_TIME = REGISTRY._names_to_collectors.get('dashboard_aggregation_seconds')
 
 # FastAPI app configuration
 app = FastAPI(
@@ -104,11 +118,11 @@ cache_stats: Dict[str, Dict] = {
 }
 
 # Advanced analytics engines
-predictive_engine: Optional[PredictiveAnalyticsEngine] = None
-comparative_engine: Optional[ComparativeAnalyticsEngine] = None
-content_engine: Optional[ContentEffectivenessEngine] = None
-statistical_engine: Optional[StatisticalAnalysisEngine] = None
-insights_engine: Optional[AutomatedInsightsEngine] = None
+predictive_engine: Optional[Any] = None
+comparative_engine: Optional[Any] = None
+content_engine: Optional[Any] = None
+statistical_engine: Optional[Any] = None
+insights_engine: Optional[Any] = None
 
 # WebSocket connection manager
 class WebSocketManager:
@@ -292,7 +306,7 @@ class DashboardTimeRange(BaseModel):
     """Time range specification for dashboard queries"""
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
-    preset: Optional[str] = Field(None, regex="^(1h|6h|24h|7d|30d|90d|1y)$")
+    preset: Optional[str] = Field(None, pattern="^(1h|6h|24h|7d|30d|90d|1y)$")
     
     def get_dates(self) -> Tuple[datetime, datetime]:
         """Convert to actual datetime range"""
@@ -332,9 +346,9 @@ class TimeSeriesRequest(BaseModel):
     """Request for time-series data"""
     metrics: List[str] = Field(..., description="Metrics to retrieve")
     time_range: DashboardTimeRange
-    granularity: str = Field("1h", regex="^(5m|15m|1h|6h|1d|1w)$")
+    granularity: str = Field("1h", pattern="^(5m|15m|1h|6h|1d|1w)$")
     filters: Optional[DashboardFilters] = None
-    aggregation: str = Field("avg", regex="^(avg|sum|min|max|count)$")
+    aggregation: str = Field("avg", pattern="^(avg|sum|min|max|count)$")
 
 class AggregationRequest(BaseModel):
     """Request for data aggregation"""
@@ -346,7 +360,7 @@ class AggregationRequest(BaseModel):
 
 class ComparativeAnalysisRequest(BaseModel):
     """Request for comparative analysis"""
-    comparison_type: str = Field(..., regex="^(students|concepts|time_periods|cohorts)$")
+    comparison_type: str = Field(..., pattern="^(students|concepts|time_periods|cohorts)$")
     primary_entities: List[str]
     comparison_entities: List[str]
     metrics: List[str]
@@ -357,21 +371,21 @@ class RealTimeAlert(BaseModel):
     alert_id: str
     metric: str
     threshold: float
-    comparison: str = Field(..., regex="^(gt|lt|gte|lte|eq)$")
+    comparison: str = Field(..., pattern="^(gt|lt|gte|lte|eq)$")
     enabled: bool = True
 
 # Advanced Analytics Request Models
 class PredictiveAnalysisRequest(BaseModel):
     """Request for predictive analysis"""
     student_ids: Optional[List[str]] = None
-    prediction_type: str = Field(..., regex="^(success|engagement|performance|risk)$")
+    prediction_type: str = Field(..., pattern="^(success|engagement|performance|risk)$")
     horizon_days: int = Field(7, ge=1, le=30)
     include_confidence_intervals: bool = True
     include_contributing_factors: bool = True
 
 class ComparativeAnalysisRequest(BaseModel):
     """Request for comparative analysis"""
-    analysis_type: str = Field(..., regex="^(cohort|temporal|ab_test|benchmark)$")
+    analysis_type: str = Field(..., pattern="^(cohort|temporal|ab_test|benchmark)$")
     primary_entities: List[str]
     comparison_entities: List[str]
     metrics: List[str]
@@ -383,24 +397,24 @@ class ContentEffectivenessRequest(BaseModel):
     """Request for content effectiveness analysis"""
     content_ids: Optional[List[str]] = None
     content_types: Optional[List[str]] = None
-    analysis_depth: str = Field("standard", regex="^(basic|standard|comprehensive)$")
+    analysis_depth: str = Field("standard", pattern="^(basic|standard|comprehensive)$")
     include_recommendations: bool = True
     time_window_days: int = Field(30, ge=7, le=90)
 
 class StatisticalAnalysisRequest(BaseModel):
     """Request for statistical analysis"""
-    analysis_type: str = Field(..., regex="^(timeseries|clustering|correlation|anomaly)$")
+    analysis_type: str = Field(..., pattern="^(timeseries|clustering|correlation|anomaly)$")
     metrics: List[str]
     time_range: DashboardTimeRange
-    granularity: str = Field("1D", regex="^(1H|6H|1D|1W)$")
+    granularity: str = Field("1D", pattern="^(1H|6H|1D|1W)$")
     advanced_options: Optional[Dict[str, Any]] = None
 
 class InsightGenerationRequest(BaseModel):
     """Request for automated insight generation"""
     insight_types: List[str] = Field(default=["trend", "anomaly", "performance", "recommendation"])
     time_window_days: int = Field(7, ge=1, le=30)
-    importance_threshold: str = Field("medium", regex="^(low|medium|high|critical)$")
-    target_audience: str = Field("educator", regex="^(educator|administrator|student)$")
+    importance_threshold: str = Field("medium", pattern="^(low|medium|high|critical)$")
+    target_audience: str = Field("educator", pattern="^(educator|administrator|student)$")
     include_natural_language: bool = True
 
 # Startup and shutdown events
@@ -415,8 +429,10 @@ async def startup_event():
     try:
         # Initialize Redis connection
         redis_client = redis.Redis(
-            host="localhost",
-            port=6379,
+            host=os.environ.get("REDIS_HOST", "redis"),
+            port=int(os.environ.get("REDIS_PORT", "6379")),
+            password=os.environ.get("REDIS_PASSWORD", ""),
+            db=int(os.environ.get("REDIS_DB", "0")),
             decode_responses=False,
             socket_connect_timeout=5,
             socket_timeout=5
@@ -1104,8 +1120,8 @@ async def get_class_overview(
 # Export and data management endpoints
 @app.post("/dashboard/export", tags=["Data Management"])
 async def export_dashboard_data(
-    export_format: str = Field(..., regex="^(csv|json|excel)$"),
-    data_type: str = Field(..., regex="^(interactions|analytics|summary)$"),
+    export_format: str = Query(..., pattern="^(csv|json|excel)$"),
+    data_type: str = Query(..., pattern="^(interactions|analytics|summary)$"),
     time_range: DashboardTimeRange = Depends(),
     filters: Optional[DashboardFilters] = None,
     db: DatabaseManager = Depends(get_db)
@@ -1195,7 +1211,7 @@ async def get_cache_statistics():
 @app.post("/dashboard/cache/invalidate", tags=["Cache Management"])
 async def invalidate_cache(
     pattern: Optional[str] = None,
-    cache_layer: str = Field("all", regex="^(memory|redis|all)$")
+    cache_layer: str = Query("all", pattern="^(memory|redis|all)$")
 ):
     """Invalidate cache entries"""
     try:
@@ -1224,7 +1240,7 @@ async def invalidate_cache(
 @app.post("/dashboard/cache/warm", tags=["Cache Management"])
 async def warm_cache(
     background_tasks: BackgroundTasks,
-    cache_types: List[str] = Field(default=["summary", "timeseries"])
+    cache_types: List[str] = Query(default=["summary", "timeseries"])
 ):
     """Warm cache with frequently accessed data"""
     try:
@@ -1695,7 +1711,7 @@ async def generate_automated_insights(
 @app.post("/dashboard/analytics/train-models", tags=["Advanced Analytics"])
 async def trigger_model_training(
     background_tasks: BackgroundTasks,
-    model_types: List[str] = Field(default=["predictive", "content_effectiveness"]),
+    model_types: List[str] = Query(default=["predictive", "content_effectiveness"]),
     force_retrain: bool = False
 ):
     """Trigger background model training"""

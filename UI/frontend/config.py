@@ -20,7 +20,7 @@ class Config:
     MCP_API_KEY = os.getenv("MCP_API_KEY", "")
     
     # Database API Configuration
-    DATABASE_API_URL = os.getenv("DATABASE_API_URL", "http://localhost:8001")
+    DATABASE_API_URL = os.getenv("DATABASE_API_URL", "http://physics-database-api:8001")
     DATABASE_LOGGING_ENABLED = os.getenv("DATABASE_LOGGING_ENABLED", "true").lower() == "true"
     
     # Physics Agents Configuration

@@ -21,7 +21,7 @@ echo "Redis is ready!"
 
 # Wait for Neo4j to be ready
 echo "Waiting for Neo4j to be ready..."
-while ! curl -f -s http://${NEO4J_HOST:-neo4j}:${NEO4J_HTTP_PORT:-7474}/db/data/ > /dev/null; do
+while ! curl -f -s http://${NEO4J_HOST:-neo4j}:${NEO4J_HTTP_PORT:-7474}/ > /dev/null; do
     echo "Neo4j is not ready yet..."
     sleep 5
 done
@@ -30,7 +30,7 @@ echo "Neo4j is ready!"
 # Run database migrations if needed
 echo "Running database setup..."
 cd /app/database
-python setup_schema.py
+python setup_schema.py || echo "⚠️  Schema setup failed (may already exist), continuing..."
 
 # Start the API server
 echo "Starting Database API server on port 8001..."

@@ -13,6 +13,7 @@ from physics_mcp_tools.forces_utils import (
     degrees_to_radians,
     radians_to_degrees,
 )
+from physics_mcp_tools.database_logger import DatabaseLogger, create_tool_wrapper
 import uvicorn
 import argparse
 NAME = "forces_mcp_server"
@@ -30,9 +31,22 @@ def serve(host, port, transport):  # noqa: PLR0915
     logger.info('Starting Forces MCP Server')
     mcp = FastMCP(NAME, stateless_http=False)
 
+    # Initialize database logger
+    db_logger = DatabaseLogger("forces")
+
+    # Test database connection on startup
+    async def test_db_connection():
+        connected = await db_logger.test_connection()
+        if connected:
+            await db_logger.log_server_status("starting", {"port": port, "host": host})
+            logger.info("Database logging enabled for Forces MCP server")
+        else:
+            logger.warning("Database API not available - running without logging")
+
 
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "add_forces_1d")
     async def add_forces_1d(forces: str) -> str:
         """Add forces in one dimension (along a line).
 
@@ -73,6 +87,7 @@ def serve(host, port, transport):  # noqa: PLR0915
             return "Error: Please provide valid numbers separated by commas (e.g., '10, -5, 15')"
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "add_forces_2d")
     async def add_forces_2d(forces_data: List[Dict]) -> str:#(forces_data: str) -> str:
         """
         Add multiple 2D forces to find the resultant.
@@ -154,6 +169,7 @@ def serve(host, port, transport):  # noqa: PLR0915
             return f"Error: {str(e)}\nExpected format: '[{{\"magnitude\": 10, \"angle\": 30}}]'"
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "resolve_force_components")
     async def resolve_force_components(magnitude: float, angle_degrees: float) -> str:
         """Break down a force into its x and y components.
 
@@ -372,6 +388,7 @@ def serve(host, port, transport):  # noqa: PLR0915
             return 'Error: Please provide valid JSON format like [{"magnitude": 10, "angle": 30}]'
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "calculate_spring_force_tool")
     async def calculate_spring_force_tool(spring_constant: float, displacement: float) -> str:
         """Calculate spring force using Hooke's Law.
 
@@ -418,6 +435,7 @@ def serve(host, port, transport):  # noqa: PLR0915
             return f"Error in calculation: {str(e)}"
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "calculate_friction_force_tool")
     async def calculate_friction_force_tool(coefficient: float, normal_force: float, force_type: str = "kinetic") -> str:
         """Calculate friction force.
 
@@ -506,6 +524,7 @@ def serve(host, port, transport):  # noqa: PLR0915
             return f"Error in calculation: {str(e)}"
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "analyze_forces_on_incline")
     async def analyze_forces_on_incline(mass: float, angle_degrees: float, coefficient_friction: float = 0.0, gravity: float = 9.81) -> str:
         """Analyze forces acting on an object on an inclined plane.
 
@@ -826,6 +845,14 @@ def serve(host, port, transport):  # noqa: PLR0915
     logger.info(
         f'{NAME} MCP Server at {host}:{port} and transport {transport}'
     )
+
+    # Test database connection before starting server
+    import asyncio
+    try:
+        asyncio.run(test_db_connection())
+    except Exception as e:
+        logger.warning(f"Database connection test failed: {e}")
+
     if transport == "sse":
         mcp.sse_http_app.run(host=host, port=port)
     if transport == "streamable_http":

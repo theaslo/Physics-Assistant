@@ -11,11 +11,13 @@ while ! curl -f -s http://${DATABASE_API_HOST:-database-api}:${DATABASE_API_PORT
 done
 echo "Database API is ready!"
 
-# Wait for MCP servers to be ready (check a few critical ones)
+# Wait for MCP servers to be ready
 echo "Waiting for MCP servers to be ready..."
-for service in forces kinematics math energy momentum; do
-    echo "Checking MCP $service server..."
-    while ! nc -z mcp-${service} 10100; do
+for pair in forces:10100 kinematics:10101 math:10103 energy:10105 momentum:10104; do
+    service="${pair%%:*}"
+    port="${pair##*:}"
+    echo "Checking MCP $service server on port $port..."
+    while ! nc -z mcp-${service} $port; do
         echo "MCP $service server is not ready yet..."
         sleep 2
     done
