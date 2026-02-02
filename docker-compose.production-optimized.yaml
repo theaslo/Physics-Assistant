@@ -1,0 +1,333 @@
+# Production-Optimized Docker Compose for Physics Assistant
+# Includes performance optimizations and resource management
+version: '3.8'
+
+networks:
+  physics-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
+  logs-data:
+    driver: local
+
+services:
+  # Core MCP Physics Services - Optimized
+  mcp-forces:
+    build:
+      context: .
+      dockerfile: Docker/Dockerfile
+    container_name: physics-mcp-forces
+    ports:
+      - "10100:10100"
+    environment:
+      - MCP_SERVICE=forces
+      - PYTHONPATH=/app/mcp_tools
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=info
+    command: ["uv", "run", "physics-mcp", "--run", "forces-server", "--host", "0.0.0.0", "--port", "10100", "--transport", "streamable_http"]
+    restart: unless-stopped
+    networks:
+      - physics-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:10100/", "||", "exit", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  mcp-kinematics:
+    build:
+      context: .
+      dockerfile: Docker/Dockerfile
+    container_name: physics-mcp-kinematics
+    ports:
+      - "10101:10100"
+    environment:
+      - MCP_SERVICE=kinematics
+      - PYTHONPATH=/app/mcp_tools
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=info
+    command: ["uv", "run", "physics-mcp", "--run", "kinematics-server", "--host", "0.0.0.0", "--port", "10100", "--transport", "streamable_http"]
+    restart: unless-stopped
+    networks:
+      - physics-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:10100/", "||", "exit", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  mcp-math:
+    build:
+      context: .
+      dockerfile: Docker/Dockerfile
+    container_name: physics-mcp-math
+    ports:
+      - "10103:10100"
+    environment:
+      - MCP_SERVICE=math
+      - PYTHONPATH=/app/mcp_tools
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=info
+    command: ["uv", "run", "physics-mcp", "--run", "math-server", "--host", "0.0.0.0", "--port", "10100", "--transport", "streamable_http"]
+    restart: unless-stopped
+    networks:
+      - physics-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:10100/", "||", "exit", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  mcp-momentum:
+    build:
+      context: .
+      dockerfile: Docker/Dockerfile
+    container_name: physics-mcp-momentum
+    ports:
+      - "10104:10100"
+    environment:
+      - MCP_SERVICE=momentum
+      - PYTHONPATH=/app/mcp_tools
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=info
+    command: ["uv", "run", "physics-mcp", "--run", "momentum-server", "--host", "0.0.0.0", "--port", "10100", "--transport", "streamable_http"]
+    restart: unless-stopped
+    networks:
+      - physics-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:10100/", "||", "exit", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  mcp-energy:
+    build:
+      context: .
+      dockerfile: Docker/Dockerfile
+    container_name: physics-mcp-energy
+    ports:
+      - "10105:10100"
+    environment:
+      - MCP_SERVICE=energy
+      - PYTHONPATH=/app/mcp_tools
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=info
+    command: ["uv", "run", "physics-mcp", "--run", "energy-server", "--host", "0.0.0.0", "--port", "10100", "--transport", "streamable_http"]
+    restart: unless-stopped
+    networks:
+      - physics-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:10100/", "||", "exit", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  mcp-angular-motion:
+    build:
+      context: .
+      dockerfile: Docker/Dockerfile
+    container_name: physics-mcp-angular-motion
+    ports:
+      - "10106:10100"
+    environment:
+      - MCP_SERVICE=angular-motion
+      - PYTHONPATH=/app/mcp_tools
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=info
+    command: ["uv", "run", "physics-mcp", "--run", "angular-motion-server", "--host", "0.0.0.0", "--port", "10100", "--transport", "streamable_http"]
+    restart: unless-stopped
+    networks:
+      - physics-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:10100/", "||", "exit", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: Database for advanced logging (if needed for fine-tuning)
+  postgres:
+    image: postgres:15-alpine
+    container_name: physics-postgres-optional
+    environment:
+      POSTGRES_DB: physics_assistant
+      POSTGRES_USER: physics_user
+      POSTGRES_PASSWORD: ${PHYSICS_DB_PASSWORD:-secure_physics_db_2024}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - physics-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U physics_user -d physics_assistant"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    profiles:
+      - database  # Only start if explicitly requested
+
+  # Optional: Redis for session management and caching
+  redis:
+    image: redis:7-alpine
+    container_name: physics-redis-optional
+    volumes:
+      - redis-data:/data
+    networks:
+      - physics-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    profiles:
+      - database  # Only start if explicitly requested
+
+  # Log aggregation service (Optional)
+  log-aggregator:
+    image: alpine:latest
+    container_name: physics-log-aggregator
+    command: |
+      sh -c '
+        mkdir -p /logs/aggregated
+        while true; do
+          echo "[$(date)] Aggregating logs..."
+          find /logs -name "*.log" -type f -exec tail -n 100 {} + > /logs/aggregated/combined_$(date +%Y%m%d_%H).log 2>/dev/null || true
+          sleep 3600
+        done
+      '
+    volumes:
+      - logs-data:/logs
+      - ./logs:/logs/host:ro
+    networks:
+      - physics-network
+    restart: unless-stopped
+    profiles:
+      - logging  # Only start if explicitly requested
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.1'
+
+# Additional configurations for production
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-healthcheck: &default-healthcheck
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 30s
+
+x-restart-policy: &default-restart
+  restart: unless-stopped

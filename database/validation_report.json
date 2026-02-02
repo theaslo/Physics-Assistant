@@ -1,0 +1,741 @@
+{
+  "timestamp": "2025-09-08T15:24:09.937000000+00:00",
+  "node_integrity": {
+    "concept_errors": 0,
+    "formula_errors": 0,
+    "problem_errors": 0,
+    "invalid_difficulties": 0
+  },
+  "relationship_integrity": {
+    "orphaned_concepts": 0,
+    "circular_prerequisites": 0,
+    "concepts_without_content": 59,
+    "unlinked_formulas": 22,
+    "unlinked_problems": 0
+  },
+  "educational_quality": {
+    "invalid_progressions": 2,
+    "insufficient_content_domains": 2,
+    "potential_missing_prereqs": 10,
+    "invalid_formulas": 0
+  },
+  "graph_completeness": {
+    "total_nodes": 134,
+    "total_relationships": 27604,
+    "targets_met": {
+      "nodes": false,
+      "relationships": true
+    },
+    "node_distribution": {
+      "Concept": 71,
+      "Formula": 30,
+      "Subdomain": 11,
+      "Unit": 7,
+      "Domain": 4,
+      "Problem": 4,
+      "LearningPath": 4,
+      "Explanation": 3
+    },
+    "domain_distribution": {
+      "mechanics": 45,
+      "waves_oscillations": 16,
+      "electromagnetism": 10
+    },
+    "relationship_distribution": {
+      "CONTAINS": 112,
+      "INCLUDES": 21,
+      "DESCRIBES": 16,
+      "HAS_FORMULA": 16,
+      "PREREQUISITE_FOR": 10,
+      "REQUIRES": 10,
+      "RELATED_TO": 10,
+      "HAS_PROBLEM": 4,
+      "APPLIES_CONCEPT": 4,
+      "HAS_EXPLANATION": 3
+    }
+  },
+  "rag_readiness": {
+    "insufficient_descriptions": 8,
+    "short_explanations": 0,
+    "problems_no_solutions": 0,
+    "weakly_connected_concepts": 55
+  },
+  "detailed_errors": {
+    "concept_integrity_errors": [],
+    "formula_integrity_errors": [],
+    "problem_integrity_errors": [],
+    "invalid_difficulty_levels": [],
+    "concepts_without_content": [
+      {
+        "concept_name": "Displacement",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Instantaneous Velocity",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Average Velocity",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Projectile Motion",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Circular Motion",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Relative Motion",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Newton First Law",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Newton Second Law",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Newton Third Law",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Static Friction",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Kinetic Friction",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Normal Force",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Tension",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Weight",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Free Body Diagram",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Equilibrium",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Potential Energy",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Gravitational Potential Energy",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Elastic Potential Energy",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Work-Energy Theorem",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Power",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Mechanical Energy",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Impulse",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Conservation of Momentum",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Collision",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Elastic Collision",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Inelastic Collision",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Center of Mass",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Angular Position",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Angular Velocity",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Angular Acceleration",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Moment of Inertia",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Angular Momentum",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Rolling Motion",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Rotational Kinetic Energy",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Simple Harmonic Motion",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Amplitude",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Period",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Phase",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Damped Oscillations",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Forced Oscillations",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Resonance",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Wave",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Wavelength",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Transverse Wave",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Longitudinal Wave",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Interference",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Standing Wave",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Doppler Effect",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Electric Charge",
+        "domain": "electromagnetism"
+      },
+      {
+        "concept_name": "Electric Force",
+        "domain": "electromagnetism"
+      },
+      {
+        "concept_name": "Electric Field",
+        "domain": "electromagnetism"
+      },
+      {
+        "concept_name": "Electric Potential",
+        "domain": "electromagnetism"
+      },
+      {
+        "concept_name": "Capacitance",
+        "domain": "electromagnetism"
+      },
+      {
+        "concept_name": "Gauss Law",
+        "domain": "electromagnetism"
+      },
+      {
+        "concept_name": "Magnetic Field",
+        "domain": "electromagnetism"
+      },
+      {
+        "concept_name": "Magnetic Force",
+        "domain": "electromagnetism"
+      },
+      {
+        "concept_name": "Electromagnetic Induction",
+        "domain": "electromagnetism"
+      },
+      {
+        "concept_name": "Lenz Law",
+        "domain": "electromagnetism"
+      }
+    ],
+    "unlinked_formulas": [
+      {
+        "formula_id": "kinematics_3",
+        "formula_name": "Third kinematic equation"
+      },
+      {
+        "formula_id": "projectile_range",
+        "formula_name": "Projectile range"
+      },
+      {
+        "formula_id": "weight",
+        "formula_name": "Weight formula"
+      },
+      {
+        "formula_id": "friction_static",
+        "formula_name": "Static friction"
+      },
+      {
+        "formula_id": "friction_kinetic",
+        "formula_name": "Kinetic friction"
+      },
+      {
+        "formula_id": "gravitational_pe",
+        "formula_name": "Gravitational potential energy"
+      },
+      {
+        "formula_id": "elastic_pe",
+        "formula_name": "Elastic potential energy"
+      },
+      {
+        "formula_id": "power",
+        "formula_name": "Power formula"
+      },
+      {
+        "formula_id": "impulse",
+        "formula_name": "Impulse-momentum theorem"
+      },
+      {
+        "formula_id": "elastic_collision_1d",
+        "formula_name": "Elastic collision formula"
+      },
+      {
+        "formula_id": "angular_momentum",
+        "formula_name": "Angular momentum"
+      },
+      {
+        "formula_id": "rotational_ke",
+        "formula_name": "Rotational kinetic energy"
+      },
+      {
+        "formula_id": "rolling_condition",
+        "formula_name": "Rolling without slipping"
+      },
+      {
+        "formula_id": "shm_position",
+        "formula_name": "SHM position"
+      },
+      {
+        "formula_id": "frequency_period",
+        "formula_name": "Frequency-period relation"
+      },
+      {
+        "formula_id": "spring_period",
+        "formula_name": "Spring oscillator period"
+      },
+      {
+        "formula_id": "wave_equation",
+        "formula_name": "Sinusoidal wave equation"
+      },
+      {
+        "formula_id": "coulomb_law",
+        "formula_name": "Coulomb's law"
+      },
+      {
+        "formula_id": "electric_field",
+        "formula_name": "Electric field definition"
+      },
+      {
+        "formula_id": "electric_potential",
+        "formula_name": "Electric potential"
+      },
+      {
+        "formula_id": "magnetic_force",
+        "formula_name": "Magnetic force on charge"
+      },
+      {
+        "formula_id": "faraday_law",
+        "formula_name": "Faraday's law"
+      }
+    ],
+    "orphaned_concepts": [],
+    "circular_prerequisites": [],
+    "unlinked_problems": [],
+    "invalid_difficulty_progressions": [
+      {
+        "path_name": "Mechanics Fundamentals",
+        "current_concept": "Acceleration",
+        "current_difficulty": "intermediate",
+        "next_concept": "Force",
+        "next_difficulty": "beginner"
+      },
+      {
+        "path_name": "Waves and Oscillations",
+        "current_concept": "Simple Harmonic Motion",
+        "current_difficulty": "intermediate",
+        "next_concept": "Period",
+        "next_difficulty": "beginner"
+      }
+    ],
+    "insufficient_domain_content": [
+      {
+        "domain": "waves_oscillations",
+        "concept_count": 16,
+        "problem_count": 1,
+        "formula_count": 2
+      },
+      {
+        "domain": "electromagnetism",
+        "concept_count": 10,
+        "problem_count": 0,
+        "formula_count": 0
+      }
+    ],
+    "potential_missing_prerequisites": [
+      {
+        "basic_concept": "Position",
+        "advanced_concept": "Relative Motion",
+        "domain": "mechanics"
+      },
+      {
+        "basic_concept": "Displacement",
+        "advanced_concept": "Relative Motion",
+        "domain": "mechanics"
+      },
+      {
+        "basic_concept": "Velocity",
+        "advanced_concept": "Relative Motion",
+        "domain": "mechanics"
+      },
+      {
+        "basic_concept": "Average Velocity",
+        "advanced_concept": "Relative Motion",
+        "domain": "mechanics"
+      },
+      {
+        "basic_concept": "Amplitude",
+        "advanced_concept": "Damped Oscillations",
+        "domain": "waves_oscillations"
+      },
+      {
+        "basic_concept": "Period",
+        "advanced_concept": "Damped Oscillations",
+        "domain": "waves_oscillations"
+      },
+      {
+        "basic_concept": "Frequency",
+        "advanced_concept": "Damped Oscillations",
+        "domain": "waves_oscillations"
+      },
+      {
+        "basic_concept": "Amplitude",
+        "advanced_concept": "Forced Oscillations",
+        "domain": "waves_oscillations"
+      },
+      {
+        "basic_concept": "Period",
+        "advanced_concept": "Forced Oscillations",
+        "domain": "waves_oscillations"
+      },
+      {
+        "basic_concept": "Frequency",
+        "advanced_concept": "Forced Oscillations",
+        "domain": "waves_oscillations"
+      }
+    ],
+    "invalid_formula_expressions": [],
+    "insufficient_concept_descriptions": [
+      {
+        "concept_name": "Newton First Law",
+        "description_length": 14
+      },
+      {
+        "concept_name": "Newton Second Law",
+        "description_length": 19
+      },
+      {
+        "concept_name": "Weight",
+        "description_length": 19
+      },
+      {
+        "concept_name": "Kinetic Energy",
+        "description_length": 16
+      },
+      {
+        "concept_name": "Elastic Potential Energy",
+        "description_length": 17
+      },
+      {
+        "concept_name": "Power",
+        "description_length": 18
+      },
+      {
+        "concept_name": "Impulse",
+        "description_length": 18
+      },
+      {
+        "concept_name": "Torque",
+        "description_length": 16
+      }
+    ],
+    "weakly_connected_concepts": [
+      {
+        "concept_name": "Displacement",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Instantaneous Velocity",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Average Velocity",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Projectile Motion",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Circular Motion",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Relative Motion",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Newton First Law",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Newton Second Law",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Newton Third Law",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Friction",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Static Friction",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Kinetic Friction",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Normal Force",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Tension",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Weight",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Free Body Diagram",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Equilibrium",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Potential Energy",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Gravitational Potential Energy",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Elastic Potential Energy",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Work-Energy Theorem",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Power",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Mechanical Energy",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Impulse",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Conservation of Momentum",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Collision",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Elastic Collision",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Inelastic Collision",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Center of Mass",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Angular Position",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Angular Velocity",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Angular Acceleration",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Torque",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Moment of Inertia",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Angular Momentum",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Rolling Motion",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Rotational Kinetic Energy",
+        "domain": "mechanics"
+      },
+      {
+        "concept_name": "Amplitude",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Phase",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Damped Oscillations",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Forced Oscillations",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Resonance",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Wavelength",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Wave Speed",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Transverse Wave",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Longitudinal Wave",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Interference",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Standing Wave",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Doppler Effect",
+        "domain": "waves_oscillations"
+      },
+      {
+        "concept_name": "Electric Charge",
+        "domain": "electromagnetism"
+      },
+      {
+        "concept_name": "Electric Force",
+        "domain": "electromagnetism"
+      },
+      {
+        "concept_name": "Capacitance",
+        "domain": "electromagnetism"
+      },
+      {
+        "concept_name": "Gauss Law",
+        "domain": "electromagnetism"
+      },
+      {
+        "concept_name": "Magnetic Force",
+        "domain": "electromagnetism"
+      },
+      {
+        "concept_name": "Lenz Law",
+        "domain": "electromagnetism"
+      }
+    ],
+    "short_explanations": [],
+    "problems_without_solutions": []
+  }
+}

@@ -1,0 +1,302 @@
+# Physics Assistant - Core Application Stack (Layers 1-4)
+#narnet-dekfoh-vabKu5
+networks:
+  physics-network:
+    name: physics_network
+    driver: bridge
+
+volumes:
+  postgres-data:
+    driver: local
+  neo4j-data:
+    driver: local
+  redis-data:
+    driver: local
+
+services:
+  # Layer 1 - Data Stores
+  postgres:
+    build:
+      context: .
+      dockerfile: docker/database/postgresql/Dockerfile
+    container_name: physics-postgres
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PHYSICS_DB_PASSWORD: ${PHYSICS_DB_PASSWORD}
+      MONITOR_DB_PASSWORD: ${MONITOR_DB_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./database/backups:/var/lib/postgresql/backups
+    networks:
+      - physics-network
+    restart: unless-stopped
+
+  neo4j:
+    build:
+      context: .
+      dockerfile: docker/database/neo4j/Dockerfile
+    container_name: physics-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD}
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: 'yes'
+      NEO4J_PLUGINS: '["apoc"]'
+    volumes:
+      - neo4j-data:/data
+    networks:
+      - physics-network
+    restart: unless-stopped
+
+  redis:
+    build:
+      context: .
+      dockerfile: docker/database/redis/Dockerfile
+    container_name: physics-redis
+    volumes:
+      - redis-data:/data
+    networks:
+      - physics-network
+    restart: unless-stopped
+
+  # Layer 2 - APIs
+  database-api:
+    build:
+      context: .
+      dockerfile: docker/api/database-api/Dockerfile
+    container_name: physics-database-api
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: physics_assistant
+      POSTGRES_USER: physics_user
+      POSTGRES_PASSWORD: ${PHYSICS_DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: physics_redis_2024
+      NEO4J_HOST: neo4j
+      NEO4J_PORT: 7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+    volumes:
+      - ./database/logs:/app/logs
+      - ./database/backups:/app/backups
+    networks:
+      - physics-network
+    depends_on:
+      - postgres
+      - redis
+      - neo4j
+    restart: unless-stopped
+
+  dashboard-api:
+    build:
+      context: .
+      dockerfile: docker/api/dashboard-api/Dockerfile
+    container_name: physics-dashboard-api
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: physics_assistant
+      POSTGRES_USER: physics_user
+      POSTGRES_PASSWORD: ${PHYSICS_DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: physics_redis_2024
+      NEO4J_HOST: neo4j
+      NEO4J_PORT: 7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      DATABASE_API_HOST: database-api
+      DATABASE_API_PORT: 8001
+    volumes:
+      - ./database/logs:/app/logs
+      - ./database/exports:/app/exports
+    networks:
+      - physics-network
+    depends_on:
+      - database-api
+    restart: unless-stopped
+
+  # Layer 3 - Physics MCP Servers
+  mcp-forces:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    container_name: physics-mcp-forces
+    environment:
+      MCP_SERVICE: forces
+      MCP_PORT: 10100
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: streamable_http
+      DATABASE_API_HOST: database-api
+      DATABASE_API_PORT: 8001
+    networks:
+      - physics-network
+    depends_on:
+      - database-api
+    restart: unless-stopped
+
+  mcp-kinematics:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    container_name: physics-mcp-kinematics
+    environment:
+      MCP_SERVICE: kinematics
+      MCP_PORT: 10101
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: streamable_http
+      DATABASE_API_HOST: database-api
+      DATABASE_API_PORT: 8001
+    networks:
+      - physics-network
+    depends_on:
+      - database-api
+    restart: unless-stopped
+
+  mcp-math:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    container_name: physics-mcp-math
+    environment:
+      MCP_SERVICE: math
+      MCP_PORT: 10103
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: streamable_http
+      DATABASE_API_HOST: database-api
+      DATABASE_API_PORT: 8001
+    networks:
+      - physics-network
+    depends_on:
+      - database-api
+    restart: unless-stopped
+
+  mcp-energy:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    container_name: physics-mcp-energy
+    environment:
+      MCP_SERVICE: energy
+      MCP_PORT: 10105
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: streamable_http
+      DATABASE_API_HOST: database-api
+      DATABASE_API_PORT: 8001
+    networks:
+      - physics-network
+    depends_on:
+      - database-api
+    restart: unless-stopped
+
+  mcp-momentum:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    container_name: physics-mcp-momentum
+    environment:
+      MCP_SERVICE: momentum
+      MCP_PORT: 10104
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: streamable_http
+      DATABASE_API_HOST: database-api
+      DATABASE_API_PORT: 8001
+    networks:
+      - physics-network
+    depends_on:
+      - database-api
+    restart: unless-stopped
+
+  mcp-angular-motion:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    container_name: physics-mcp-angular-motion
+    environment:
+      MCP_SERVICE: angular-motion
+      MCP_PORT: 10106
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: streamable_http
+      DATABASE_API_HOST: database-api
+      DATABASE_API_PORT: 8001
+    networks:
+      - physics-network
+    depends_on:
+      - database-api
+    restart: unless-stopped
+
+  physics-agents-api:
+    build:
+      context: .
+      dockerfile: docker/api/physics-agents/Dockerfile
+    container_name: physics-agents-api
+    environment:
+      DATABASE_API_HOST: database-api
+      DATABASE_API_PORT: 8001
+    volumes:
+      - ./UI/logs:/app/logs
+      - ./UI/temp:/app/temp
+    networks:
+      - physics-network
+    depends_on:
+      - database-api
+      - mcp-forces
+      - mcp-kinematics
+      - mcp-math
+      - mcp-energy
+      - mcp-momentum
+      - mcp-angular-motion
+    restart: unless-stopped
+
+  # Layer 4 - Frontends
+  streamlit-ui:
+    build:
+      context: .
+      dockerfile: docker/frontend/streamlit-ui/Dockerfile
+    container_name: physics-streamlit-ui
+    ports:
+      - "8501:8501"
+    environment:
+      PHYSICS_API_HOST: physics-agents-api
+      PHYSICS_API_PORT: 8000
+      DATABASE_API_HOST: database-api
+      DATABASE_API_PORT: 8001
+    volumes:
+      - ./UI/logs:/app/logs
+      - ./UI/uploads:/app/uploads
+      - ./UI/temp:/app/temp
+    networks:
+      - physics-network
+    depends_on:
+      - physics-agents-api
+    restart: unless-stopped
+
+  react-dashboard:
+    build:
+      context: .
+      dockerfile: docker/frontend/react-dashboard/Dockerfile
+    container_name: physics-react-dashboard
+    ports:
+      - "3000:80"
+    networks:
+      - physics-network
+    depends_on:
+      - dashboard-api
+    restart: unless-stopped
+
+  nginx-gateway:
+    build:
+      context: .
+      dockerfile: docker/frontend/nginx-gateway/Dockerfile
+    container_name: physics-nginx-gateway
+    ports:
+      - "8080:80"
+      - "8443:443"
+    networks:
+      - physics-network
+    depends_on:
+      - streamlit-ui
+      - react-dashboard
+    restart: unless-stopped
