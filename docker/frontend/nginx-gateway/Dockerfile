@@ -19,9 +19,9 @@ COPY docker/frontend/nginx-gateway/nginx.conf /etc/nginx/nginx.conf
 COPY docker/frontend/nginx-gateway/default.conf /etc/nginx/conf.d/default.conf
 COPY docker/frontend/nginx-gateway/ssl/ /etc/nginx/ssl/
 
-# Create necessary directories
+# Create necessary directories and set permissions
 RUN mkdir -p /var/cache/nginx /var/log/nginx /usr/share/nginx/html && \
-    chown -R physicsapp:physicsapp /var/cache/nginx /var/log/nginx /usr/share/nginx/html
+    chown -R physicsapp:physicsapp /var/cache/nginx /var/log/nginx /usr/share/nginx/html /etc/nginx
 
 # Copy static files and error pages
 COPY docker/frontend/nginx-gateway/html/ /usr/share/nginx/html/
