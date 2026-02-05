@@ -227,7 +227,7 @@ services:
       - database-api
     restart: unless-stopped
 
-  physics-agents-:
+  physics-agents-api:
     build:
       context: .
       dockerfile: docker/api/physics-agents/Dockerfile
@@ -300,4 +300,3 @@ services:
       - streamlit-ui
       - react-dashboard
     restart: unless-stopped
-api
