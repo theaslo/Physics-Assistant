@@ -110,16 +110,24 @@ app.add_middleware(
 )
 
 # Helper functions
-async def get_or_create_agent(agent_id: str, use_direct_tools: bool = True, enable_rag: bool = True, rag_api_url: str = "http://localhost:8001") -> CombinedPhysicsAgent:
+async def get_or_create_agent(agent_id: str, use_direct_tools: bool = True, enable_rag: bool = True, rag_api_url: str = None) -> CombinedPhysicsAgent:
     """Get existing agent or create new one with RAG and database logging enabled"""
+    import os
+    database_api_host = os.getenv("DATABASE_API_HOST", "localhost")
+    database_api_port = os.getenv("DATABASE_API_PORT", "8001")
+    database_api_url = f"http://{database_api_host}:{database_api_port}"
+
+    if rag_api_url is None:
+        rag_api_url = database_api_url
+
     agent_key = f"{agent_id}_{use_direct_tools}_{enable_rag}"
-    
+
     if agent_key not in agent_store:
         logger.info(f"Creating new agent: {agent_id} (RAG: {'enabled' if enable_rag else 'disabled'})")
         agent = CombinedPhysicsAgent(
             agent_id=agent_id,
             use_direct_tools=use_direct_tools,
-            database_api_url="http://localhost:8001",
+            database_api_url=database_api_url,
             enable_database_logging=True,
             enable_rag=enable_rag,
             rag_api_url=rag_api_url

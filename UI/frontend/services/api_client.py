@@ -18,8 +18,10 @@ logger = logging.getLogger(__name__)
 
 class PhysicsAPIClient:
     """Client for communicating with the Physics Assistant FastAPI server"""
-    
-    def __init__(self, base_url: str = "http://localhost:8000"):
+
+    def __init__(self, base_url: str = None):
+        if base_url is None:
+            base_url = Config.MCP_SERVER_URL
         self.base_url = base_url.rstrip('/')
         self.session = requests.Session()
         self.session.headers.update({

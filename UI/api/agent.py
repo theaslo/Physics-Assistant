@@ -93,47 +93,57 @@ class CombinedPhysicsAgent:
 
     def _setup_agent_config(self):
         """Setup agent-specific configuration"""
+        # Get MCP host from environment (for Docker) or default to localhost
+        import os
+        default_mcp_host = os.getenv("MCP_DEFAULT_HOST", "localhost")
+
         if self.agent_id == "forces_agent":
             from prompts.force_agent_prompt import get_user_message, get_system_message, get_metadata
             self.get_system_message = get_system_message
             self.get_user_message = get_user_message
             self.metadata = get_metadata()
-            self.mcp_port = 10100  # MCP port for forces agent on VM
-            
+            self.mcp_port = 10100
+            self.mcp_host = os.getenv("MCP_FORCES_HOST", default_mcp_host)
+
         elif self.agent_id == "kinematics_agent":
             from prompts.kinematics_agent_prompt import get_user_message, get_system_message, get_metadata
             self.get_system_message = get_system_message
-            self.get_user_message = get_user_message  
+            self.get_user_message = get_user_message
             self.metadata = get_metadata()
-            self.mcp_port = 10101  # MCP port for kinematics agent on VM
+            self.mcp_port = 10101
+            self.mcp_host = os.getenv("MCP_KINEMATICS_HOST", default_mcp_host)
 
         elif self.agent_id == "math_agent":
             from prompts.math_agent_prompt import get_user_message, get_system_message, get_metadata
             self.get_system_message = get_system_message
-            self.get_user_message = get_user_message  
+            self.get_user_message = get_user_message
             self.metadata = get_metadata()
-            self.mcp_port = 10103  # MCP port for math agent on VM
+            self.mcp_port = 10103
+            self.mcp_host = os.getenv("MCP_MATH_HOST", default_mcp_host)
 
         elif self.agent_id == "momentum_agent":
             from prompts.momentum_agent_prompt import get_user_message, get_system_message, get_metadata
             self.get_system_message = get_system_message
-            self.get_user_message = get_user_message  
+            self.get_user_message = get_user_message
             self.metadata = get_metadata()
-            self.mcp_port = 10104  # MCP port for math agent on VM    
+            self.mcp_port = 10104
+            self.mcp_host = os.getenv("MCP_MOMENTUM_HOST", default_mcp_host)
 
         elif self.agent_id == "energy_agent":
             from prompts.energy_agent_prompt import get_user_message, get_system_message, get_metadata
             self.get_system_message = get_system_message
-            self.get_user_message = get_user_message  
+            self.get_user_message = get_user_message
             self.metadata = get_metadata()
-            self.mcp_port = 10105  # MCP port for math agent on VM    
+            self.mcp_port = 10105
+            self.mcp_host = os.getenv("MCP_ENERGY_HOST", default_mcp_host)
 
         elif self.agent_id == "angular_motion_agent":
             from prompts.angular_motion_agent_prompt import get_user_message, get_system_message, get_metadata
             self.get_system_message = get_system_message
-            self.get_user_message = get_user_message  
+            self.get_user_message = get_user_message
             self.metadata = get_metadata()
-            self.mcp_port = 10106  # MCP port for math agent on VM            
+            self.mcp_port = 10106
+            self.mcp_host = os.getenv("MCP_ANGULAR_MOTION_HOST", default_mcp_host)
         else:
             raise ValueError(f"Agent type '{self.agent_id}' not supported. Use 'forces_agent', 'kinematics_agent' or 'math_agent'.")
 
@@ -361,13 +371,14 @@ class CombinedPhysicsAgent:
             
         print(f"🚀 Initializing {self.agent_id.title().replace('_', ' ')} (Mode: {'Direct Tools' if self.use_direct_tools else 'LangChain Agent'})...")
         
-        # Connect to MCP server on VM using HTTP transport
+        # Connect to MCP server using HTTP transport
         server_name = self.agent_id.split('_')[0]  # 'forces' 'kinematics' 'math', 'momentum' or 'energy'
+        mcp_url = f"http://{self.mcp_host}:{self.mcp_port}/mcp/"
+        print(f"📡 Connecting to MCP server at {mcp_url}")
         self.client = MultiServerMCPClient({
             server_name: {
                 "transport": "streamable_http",
-                #"url": f"http://htfd-physics.grove.ad.uconn.edu:{self.mcp_port}/mcp/",
-                "url": f"http://localhost:{self.mcp_port}/mcp/",
+                "url": mcp_url,
             },
         })
         

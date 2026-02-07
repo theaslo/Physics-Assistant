@@ -235,6 +235,13 @@ services:
     environment:
       DATABASE_API_HOST: database-api
       DATABASE_API_PORT: 8001
+      MCP_DEFAULT_HOST: localhost
+      MCP_FORCES_HOST: mcp-forces
+      MCP_KINEMATICS_HOST: mcp-kinematics
+      MCP_MATH_HOST: mcp-math
+      MCP_MOMENTUM_HOST: mcp-momentum
+      MCP_ENERGY_HOST: mcp-energy
+      MCP_ANGULAR_MOTION_HOST: mcp-angular-motion
     volumes:
       - ./UI/logs:/app/logs
       - ./UI/temp:/app/temp
@@ -263,6 +270,8 @@ services:
       PHYSICS_API_PORT: 8000
       DATABASE_API_HOST: database-api
       DATABASE_API_PORT: 8001
+      MCP_SERVER_URL: http://physics-agents-api:8000
+      DATABASE_API_URL: http://database-api:8001
     volumes:
       - ./UI/logs:/app/logs
       - ./UI/uploads:/app/uploads

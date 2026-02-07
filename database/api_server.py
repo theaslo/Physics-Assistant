@@ -133,6 +133,11 @@ class InteractionResponse(BaseModel):
     timestamp: datetime
     status: str = "success"
 
+class SessionRequest(BaseModel):
+    """Request model for creating sessions"""
+    user_id: str = Field(..., description="User identifier")
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Session metadata")
+
 class AnalyticsQuery(BaseModel):
     """Query parameters for analytics endpoints"""
     user_id: Optional[str] = None
@@ -851,26 +856,25 @@ async def get_related_concepts(
 
 @app.post("/sessions", tags=["Sessions"])
 async def create_session(
-    user_id: str,
-    metadata: Optional[Dict[str, Any]] = None,
+    request: SessionRequest,
     db: DatabaseManager = Depends(get_db)
 ):
     """Create a new user session"""
     try:
         session_id = str(uuid.uuid4())
         session_data = {
-            "user_id": user_id,
+            "user_id": request.user_id,
             "session_id": session_id,
             "created_at": datetime.now().isoformat(),
-            **(metadata or {})
+            **(request.metadata or {})
         }
         
         # Cache session in Redis
         await db.cache_user_session(session_id, session_data, ttl=3600)  # 1 hour TTL
-        
+
         return {
             "session_id": session_id,
-            "user_id": user_id,
+            "user_id": request.user_id,
             "created_at": session_data["created_at"]
         }
         
