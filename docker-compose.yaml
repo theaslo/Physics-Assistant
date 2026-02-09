@@ -227,6 +227,129 @@ services:
       - database-api
     restart: unless-stopped
 
+  # Physics 102 - Thermodynamics & Waves
+  mcp-thermodynamics:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    container_name: physics-mcp-thermodynamics
+    environment:
+      MCP_SERVICE: thermodynamics
+      MCP_PORT: 10107
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: streamable_http
+      DATABASE_API_HOST: database-api
+      DATABASE_API_PORT: 8001
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "10107"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+    networks:
+      - physics-network
+    depends_on:
+      - database-api
+    restart: unless-stopped
+
+  mcp-waves:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    container_name: physics-mcp-waves
+    environment:
+      MCP_SERVICE: waves
+      MCP_PORT: 10108
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: streamable_http
+      DATABASE_API_HOST: database-api
+      DATABASE_API_PORT: 8001
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "10108"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+    networks:
+      - physics-network
+    depends_on:
+      - database-api
+    restart: unless-stopped
+
+  # Physics 201 - Electricity & Magnetism
+  mcp-electromagnetism:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    container_name: physics-mcp-electromagnetism
+    environment:
+      MCP_SERVICE: electromagnetism
+      MCP_PORT: 10109
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: streamable_http
+      DATABASE_API_HOST: database-api
+      DATABASE_API_PORT: 8001
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "10109"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+    networks:
+      - physics-network
+    depends_on:
+      - database-api
+    restart: unless-stopped
+
+  # Physics 202 - Optics & Modern Physics
+  mcp-optics:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    container_name: physics-mcp-optics
+    environment:
+      MCP_SERVICE: optics
+      MCP_PORT: 10110
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: streamable_http
+      DATABASE_API_HOST: database-api
+      DATABASE_API_PORT: 8001
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "10110"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+    networks:
+      - physics-network
+    depends_on:
+      - database-api
+    restart: unless-stopped
+
+  mcp-modern-physics:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    container_name: physics-mcp-modern-physics
+    environment:
+      MCP_SERVICE: modern-physics
+      MCP_PORT: 10111
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: streamable_http
+      DATABASE_API_HOST: database-api
+      DATABASE_API_PORT: 8001
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "10111"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+    networks:
+      - physics-network
+    depends_on:
+      - database-api
+    restart: unless-stopped
+
   physics-agents-api:
     build:
       context: .
@@ -236,12 +359,19 @@ services:
       DATABASE_API_HOST: database-api
       DATABASE_API_PORT: 8001
       MCP_DEFAULT_HOST: localhost
+      # Physics 101 MCP servers
       MCP_FORCES_HOST: mcp-forces
       MCP_KINEMATICS_HOST: mcp-kinematics
       MCP_MATH_HOST: mcp-math
       MCP_MOMENTUM_HOST: mcp-momentum
       MCP_ENERGY_HOST: mcp-energy
       MCP_ANGULAR_MOTION_HOST: mcp-angular-motion
+      # Physics 102-201-202 MCP servers (Strands agents)
+      MCP_THERMODYNAMICS_HOST: mcp-thermodynamics
+      MCP_WAVES_HOST: mcp-waves
+      MCP_ELECTROMAGNETISM_HOST: mcp-electromagnetism
+      MCP_OPTICS_HOST: mcp-optics
+      MCP_MODERN_PHYSICS_HOST: mcp-modern-physics
     volumes:
       - ./UI/logs:/app/logs
       - ./UI/temp:/app/temp
@@ -249,12 +379,19 @@ services:
       - physics-network
     depends_on:
       - database-api
+      # Physics 101
       - mcp-forces
       - mcp-kinematics
       - mcp-math
       - mcp-energy
       - mcp-momentum
       - mcp-angular-motion
+      # Physics 102-201-202
+      - mcp-thermodynamics
+      - mcp-waves
+      - mcp-electromagnetism
+      - mcp-optics
+      - mcp-modern-physics
     restart: unless-stopped
 
   # Layer 4 - Frontends
@@ -293,6 +430,19 @@ services:
       - physics-network
     depends_on:
       - dashboard-api
+    restart: unless-stopped
+
+  student-react-ui:
+    build:
+      context: .
+      dockerfile: docker/frontend/student-react-ui/Dockerfile
+    container_name: physics-student-react-ui
+    ports:
+      - "3001:80"
+    networks:
+      - physics-network
+    depends_on:
+      - physics-agents-api
     restart: unless-stopped
 
   nginx-gateway:

@@ -1,6 +1,6 @@
 """
 FastAPI server for Physics Assistant API
-Hosts CombinedPhysicsAgent with dynamic agent selection
+All physics agents now use Strands SDK with MCP tools and Ollama LLM
 """
 
 import asyncio
@@ -10,22 +10,49 @@ from typing import Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from agent import CombinedPhysicsAgent
+
+# Import all Strands-based agents
+from strands_agents import (
+    # Physics 101
+    ForcesAgent,
+    KinematicsAgent,
+    MathAgent,
+    MomentumAgent,
+    EnergyAgent,
+    AngularMotionAgent,
+    # Physics 102
+    ThermodynamicsAgent,
+    WavesAgent,
+    # Physics 201
+    ElectromagnetismAgent,
+    # Physics 202
+    OpticsAgent,
+    ModernPhysicsAgent,
+    # Base class for type hints
+    StrandsPhysicsAgent
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Global agent store for managing active agents
-agent_store: Dict[str, CombinedPhysicsAgent] = {}
+# Valid agent IDs by course level - ALL use Strands SDK now
+PHYSICS_101_AGENTS = ["forces_agent", "kinematics_agent", "math_agent", "momentum_agent", "energy_agent", "angular_motion_agent"]
+PHYSICS_102_AGENTS = ["thermodynamics_agent", "waves_agent"]
+PHYSICS_201_AGENTS = ["electromagnetism_agent"]
+PHYSICS_202_AGENTS = ["optics_agent", "modern_physics_agent"]
+ALL_VALID_AGENTS = PHYSICS_101_AGENTS + PHYSICS_102_AGENTS + PHYSICS_201_AGENTS + PHYSICS_202_AGENTS
+
+# Global agent store for managing active agents (all Strands-based now)
+agent_store: Dict[str, StrandsPhysicsAgent] = {}
 
 # Pydantic models for API requests/responses
 class AgentCreateRequest(BaseModel):
     """Request model for creating a physics agent"""
     agent_id: str = Field(
-        ..., 
-        description="Agent type: forces_agent, kinematics_agent, math_agent, momentum_agent, energy_agent, or angular_motion_agent",
-        pattern="^(forces_agent|kinematics_agent|math_agent|momentum_agent|energy_agent|angular_motion_agent)$"
+        ...,
+        description="Agent type: Physics 101 (forces, kinematics, math, momentum, energy, angular_motion) or Physics 102-202 (thermodynamics, waves, electromagnetism, optics, modern_physics)",
+        pattern="^(forces_agent|kinematics_agent|math_agent|momentum_agent|energy_agent|angular_motion_agent|thermodynamics_agent|waves_agent|electromagnetism_agent|optics_agent|modern_physics_agent)$"
     )
     use_direct_tools: bool = Field(
         default=True, 
@@ -35,9 +62,9 @@ class AgentCreateRequest(BaseModel):
         default=True,
         description="Whether to enable RAG context augmentation"
     )
-    rag_api_url: str = Field(
-        default="http://localhost:8001",
-        description="URL for RAG API server"
+    rag_api_url: Optional[str] = Field(
+        default=None,
+        description="URL for RAG API server (defaults to DATABASE_API_HOST env var)"
     )
 
 class AgentCreateResponse(BaseModel):
@@ -110,8 +137,34 @@ app.add_middleware(
 )
 
 # Helper functions
-async def get_or_create_agent(agent_id: str, use_direct_tools: bool = True, enable_rag: bool = True, rag_api_url: str = None) -> CombinedPhysicsAgent:
-    """Get existing agent or create new one with RAG and database logging enabled"""
+def _get_strands_agent_class(agent_id: str):
+    """Get the Strands agent class for a given agent_id"""
+    strands_agent_map = {
+        # Physics 101
+        "forces_agent": ForcesAgent,
+        "kinematics_agent": KinematicsAgent,
+        "math_agent": MathAgent,
+        "momentum_agent": MomentumAgent,
+        "energy_agent": EnergyAgent,
+        "angular_motion_agent": AngularMotionAgent,
+        # Physics 102
+        "thermodynamics_agent": ThermodynamicsAgent,
+        "waves_agent": WavesAgent,
+        # Physics 201
+        "electromagnetism_agent": ElectromagnetismAgent,
+        # Physics 202
+        "optics_agent": OpticsAgent,
+        "modern_physics_agent": ModernPhysicsAgent,
+    }
+    return strands_agent_map.get(agent_id)
+
+
+async def get_or_create_agent(agent_id: str, use_direct_tools: bool = True, enable_rag: bool = True, rag_api_url: str = None):
+    """Get existing agent or create new one with RAG and database logging enabled
+
+    All agents now use Strands SDK with MCP tools and Ollama LLM.
+    The use_direct_tools parameter is kept for API compatibility but ignored.
+    """
     import os
     database_api_host = os.getenv("DATABASE_API_HOST", "localhost")
     database_api_port = os.getenv("DATABASE_API_PORT", "8001")
@@ -120,22 +173,28 @@ async def get_or_create_agent(agent_id: str, use_direct_tools: bool = True, enab
     if rag_api_url is None:
         rag_api_url = database_api_url
 
-    agent_key = f"{agent_id}_{use_direct_tools}_{enable_rag}"
+    # Simplified key - all agents use Strands now
+    agent_key = f"{agent_id}_{enable_rag}"
 
     if agent_key not in agent_store:
-        logger.info(f"Creating new agent: {agent_id} (RAG: {'enabled' if enable_rag else 'disabled'})")
-        agent = CombinedPhysicsAgent(
-            agent_id=agent_id,
-            use_direct_tools=use_direct_tools,
+        logger.info(f"Creating new Strands agent: {agent_id} (RAG: {'enabled' if enable_rag else 'disabled'})")
+
+        strands_class = _get_strands_agent_class(agent_id)
+
+        if not strands_class:
+            raise ValueError(f"Unknown agent_id: {agent_id}")
+
+        agent = strands_class(
             database_api_url=database_api_url,
             enable_database_logging=True,
             enable_rag=enable_rag,
             rag_api_url=rag_api_url
         )
+
         await agent.initialize()
         agent_store[agent_key] = agent
-        logger.info(f"Agent {agent_id} created and initialized with database logging and RAG: {'enabled' if enable_rag else 'disabled'}")
-    
+        logger.info(f"Agent {agent_id} created (Strands SDK) with RAG: {'enabled' if enable_rag else 'disabled'}")
+
     return agent_store[agent_key]
 
 # API Endpoints
@@ -145,23 +204,24 @@ async def root():
     """Root endpoint with API information"""
     return {
         "message": "Physics Assistant API",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "docs_url": "/docs",
-        "available_agents": ["forces_agent", "kinematics_agent", "math_agent", "momentum_agent", "energy_agent", "angular_motion_agent"]
+        "available_agents": ALL_VALID_AGENTS,
+        "framework": "strands",
+        "courses": {
+            "physics_101": PHYSICS_101_AGENTS,
+            "physics_102": PHYSICS_102_AGENTS,
+            "physics_201": PHYSICS_201_AGENTS,
+            "physics_202": PHYSICS_202_AGENTS
+        }
     }
 
 @app.post("/agent/create", response_model=AgentCreateResponse)
 async def create_agent(request: AgentCreateRequest) -> AgentCreateResponse:
     """
-    Create and initialize a physics agent
-    
-    Compatible with the specified pattern:
-    ```python
-    return CombinedPhysicsAgent(
-        agent_id=<USER REQUESTED AGENT>, 
-        use_direct_tools=use_direct_tools
-    )
-    ```
+    Create and initialize a physics agent using Strands SDK
+
+    All agents now use Strands SDK with MCP tools and Ollama LLM.
     """
     try:
         logger.info(f"Creating agent: {request.agent_id}")
@@ -188,22 +248,21 @@ async def create_agent(request: AgentCreateRequest) -> AgentCreateResponse:
 
 @app.post("/agent/{agent_id}/solve", response_model=ProblemSolveResponse)
 async def solve_problem(
-    agent_id: str, 
+    agent_id: str,
     request: ProblemSolveRequest,
     use_direct_tools: bool = True,
     enable_rag: bool = True,
-    rag_api_url: str = "http://localhost:8001"
+    rag_api_url: Optional[str] = None
 ) -> ProblemSolveResponse:
     """
     Solve a physics problem using the specified agent
     """
     try:
         # Validate agent_id
-        valid_agents = ["forces_agent", "kinematics_agent", "math_agent", "momentum_agent", "energy_agent", "angular_motion_agent"]
-        if agent_id not in valid_agents:
+        if agent_id not in ALL_VALID_AGENTS:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid agent_id: {agent_id}. Must be one of: {', '.join(valid_agents)}"
+                detail=f"Invalid agent_id: {agent_id}. Must be one of: {', '.join(ALL_VALID_AGENTS)}"
             )
         
         # Get or create agent
@@ -242,16 +301,15 @@ async def check_agent_health(
     """
     try:
         # Validate agent_id
-        valid_agents = ["forces_agent", "kinematics_agent", "math_agent", "momentum_agent", "energy_agent", "angular_motion_agent"]
-        if agent_id not in valid_agents:
+        if agent_id not in ALL_VALID_AGENTS:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid agent_id: {agent_id}. Must be one of: {', '.join(valid_agents)}"
+                detail=f"Invalid agent_id: {agent_id}. Must be one of: {', '.join(ALL_VALID_AGENTS)}"
             )
         
-        # Get or create agent
-        agent = await get_or_create_agent(agent_id, use_direct_tools, enable_rag, rag_api_url)
-        
+        # Get or create agent (use defaults for RAG)
+        agent = await get_or_create_agent(agent_id, use_direct_tools)
+
         # Get health status
         health = await agent.health_check()
         
@@ -274,16 +332,15 @@ async def get_agent_capabilities(
     """
     try:
         # Validate agent_id
-        valid_agents = ["forces_agent", "kinematics_agent", "math_agent", "momentum_agent", "energy_agent", "angular_motion_agent"]
-        if agent_id not in valid_agents:
+        if agent_id not in ALL_VALID_AGENTS:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid agent_id: {agent_id}. Must be one of: {', '.join(valid_agents)}"
+                detail=f"Invalid agent_id: {agent_id}. Must be one of: {', '.join(ALL_VALID_AGENTS)}"
             )
         
-        # Get or create agent
-        agent = await get_or_create_agent(agent_id, use_direct_tools, enable_rag, rag_api_url)
-        
+        # Get or create agent (use defaults for RAG)
+        agent = await get_or_create_agent(agent_id, use_direct_tools)
+
         # Get capabilities
         capabilities = await agent.get_capabilities()
         
@@ -299,42 +356,100 @@ async def get_agent_capabilities(
 @app.get("/agents/list")
 async def list_available_agents():
     """
-    List all available physics agents
+    List all available physics agents organized by course level
     """
     return {
         "available_agents": [
+            # Physics 101 - Mechanics (LangChain-based)
             {
                 "agent_id": "forces_agent",
                 "name": "Forces Agent",
-                "description": "Handles force analysis, free body diagrams, and Newton's laws"
+                "description": "Handles force analysis, free body diagrams, and Newton's laws",
+                "course": "Physics 101",
+                "framework": "langchain"
             },
             {
-                "agent_id": "kinematics_agent", 
+                "agent_id": "kinematics_agent",
                 "name": "Kinematics Agent",
-                "description": "Handles motion analysis, projectile motion, and kinematics equations"
+                "description": "Handles motion analysis, projectile motion, and kinematics equations",
+                "course": "Physics 101",
+                "framework": "langchain"
             },
             {
                 "agent_id": "math_agent",
-                "name": "Math Agent", 
-                "description": "Handles mathematical calculations, algebra, and computational problems"
+                "name": "Math Agent",
+                "description": "Handles mathematical calculations, algebra, and computational problems",
+                "course": "All",
+                "framework": "langchain"
             },
             {
                 "agent_id": "momentum_agent",
                 "name": "Momentum Agent",
-                "description": "Handles momentum, impulse, and collision problems"
+                "description": "Handles momentum, impulse, and collision problems",
+                "course": "Physics 101",
+                "framework": "langchain"
             },
             {
                 "agent_id": "energy_agent",
                 "name": "Energy Agent",
-                "description": "Handles work, energy, power, and conservation of energy problems"
+                "description": "Handles work, energy, power, and conservation of energy problems",
+                "course": "Physics 101",
+                "framework": "langchain"
             },
             {
                 "agent_id": "angular_motion_agent",
                 "name": "Angular Motion Agent",
-                "description": "Handles rotational motion, angular momentum, and torque problems"
+                "description": "Handles rotational motion, angular momentum, and torque problems",
+                "course": "Physics 101",
+                "framework": "langchain"
+            },
+            # Physics 102 - Thermodynamics & Waves (Strands-based)
+            {
+                "agent_id": "thermodynamics_agent",
+                "name": "Thermodynamics Agent",
+                "description": "Handles ideal gas law, heat transfer, thermal expansion, and Carnot efficiency",
+                "course": "Physics 102",
+                "framework": "strands"
+            },
+            {
+                "agent_id": "waves_agent",
+                "name": "Waves Agent",
+                "description": "Handles wave mechanics, Doppler effect, sound intensity, and interference",
+                "course": "Physics 102",
+                "framework": "strands"
+            },
+            # Physics 201 - Electricity & Magnetism (Strands-based)
+            {
+                "agent_id": "electromagnetism_agent",
+                "name": "Electromagnetism Agent",
+                "description": "Handles Coulomb's law, circuits, magnetic fields, and Faraday's law",
+                "course": "Physics 201",
+                "framework": "strands"
+            },
+            # Physics 202 - Optics & Modern Physics (Strands-based)
+            {
+                "agent_id": "optics_agent",
+                "name": "Optics Agent",
+                "description": "Handles refraction, lenses, mirrors, diffraction, and interference",
+                "course": "Physics 202",
+                "framework": "strands"
+            },
+            {
+                "agent_id": "modern_physics_agent",
+                "name": "Modern Physics Agent",
+                "description": "Handles relativity, quantum mechanics, and nuclear physics",
+                "course": "Physics 202",
+                "framework": "strands"
             }
         ],
-        "active_agents": list(agent_store.keys())
+        "active_agents": list(agent_store.keys()),
+        "agent_counts": {
+            "physics_101": len(PHYSICS_101_AGENTS),
+            "physics_102": len(PHYSICS_102_AGENTS),
+            "physics_201": len(PHYSICS_201_AGENTS),
+            "physics_202": len(PHYSICS_202_AGENTS),
+            "total": len(ALL_VALID_AGENTS)
+        }
     }
 # @app.get("/agents/list")
 # async def list_available_agents():

@@ -1467,7 +1467,218 @@ def serve(host, port, transport):
         except Exception as e:
             return f"Error in rolling motion analysis: {str(e)}"
 
-    
+    @mcp.tool()
+    async def circular_motion(circular_data: str) -> str:
+        """
+        Analyze uniform circular motion - centripetal acceleration and force.
+
+        Args:
+            circular_data: JSON string with circular motion parameters
+                          Example: '{"radius": 0.5, "velocity": 10}'
+                          Example: '{"radius": 2, "period": 4}'
+                          Example: '{"radius": 0.3, "frequency": 5, "mass": 0.2}'
+                          Units: radius (m), velocity (m/s), period (s), frequency (Hz), mass (kg)
+
+        Returns:
+            str: Complete circular motion analysis with centripetal force
+        """
+        try:
+            data = json.loads(circular_data) if isinstance(circular_data, str) else circular_data
+
+            r = float(data.get("radius", data.get("r", 1)))
+            m = data.get("mass", data.get("m", None))
+            if m is not None: m = float(m)
+
+            result = f"""
+Uniform Circular Motion Analysis:
+=================================
+
+Radius: r = {r:.4f} m
+"""
+            if m: result += f"Mass: m = {m:.4f} kg\n"
+
+            # Calculate velocity from different inputs
+            if "velocity" in data or "v" in data:
+                v = float(data.get("velocity", data.get("v")))
+                omega = v / r
+                T = 2 * math.pi * r / v
+                f = 1 / T
+
+            elif "period" in data or "T" in data:
+                T = float(data.get("period", data.get("T")))
+                f = 1 / T
+                omega = 2 * math.pi / T
+                v = omega * r
+
+            elif "frequency" in data or "f" in data:
+                f = float(data.get("frequency", data.get("f")))
+                T = 1 / f
+                omega = 2 * math.pi * f
+                v = omega * r
+
+            elif "angular_velocity" in data or "omega" in data:
+                omega = float(data.get("angular_velocity", data.get("omega")))
+                v = omega * r
+                T = 2 * math.pi / omega
+                f = 1 / T
+            else:
+                return "Error: Provide velocity, period, frequency, or angular_velocity"
+
+            # Centripetal acceleration
+            a_c = v**2 / r  # or omega**2 * r
+
+            result += f"""
+Motion Parameters:
+- Linear velocity: v = {v:.4f} m/s
+- Angular velocity: ω = {omega:.4f} rad/s = {omega * 60 / (2*math.pi):.2f} rpm
+- Period: T = {T:.4f} s
+- Frequency: f = {f:.4f} Hz
+
+Centripetal Acceleration:
+aᶜ = v²/r = {v:.4f}²/{r:.4f} = {a_c:.4f} m/s²
+aᶜ = ω²r = {omega:.4f}² × {r:.4f} = {a_c:.4f} m/s²
+aᶜ = {a_c/9.81:.2f} g (multiples of Earth gravity)
+
+Direction: Always toward center of circle
+"""
+            if m:
+                F_c = m * a_c
+                result += f"""
+Centripetal Force:
+Fᶜ = maᶜ = mv²/r = {m:.4f} × {a_c:.4f} = {F_c:.4f} N
+Fᶜ = mω²r = {m:.4f} × {omega:.4f}² × {r:.4f} = {F_c:.4f} N
+
+This force must be provided by:
+- Tension (ball on string)
+- Friction (car turning)
+- Gravity (satellite orbit)
+- Normal force (loop-the-loop)
+"""
+            result += """
+Key Concepts:
+- Centripetal = "center-seeking"
+- Velocity is tangent to circle, acceleration points to center
+- Speed is constant, but velocity direction changes
+- Net force toward center required to maintain circular path
+
+Applications:
+- Car on curved road (friction provides Fᶜ)
+- Ball on string (tension provides Fᶜ)
+- Satellite in orbit (gravity provides Fᶜ)
+- Centrifuge (apparent outward force)
+- Banked curves (component of normal force)
+"""
+            return result
+
+        except Exception as e:
+            return f"Error in circular motion analysis: {str(e)}"
+
+    @mcp.tool()
+    async def simple_harmonic_motion(shm_data: str) -> str:
+        """
+        Analyze simple harmonic motion (springs, pendulums).
+
+        Args:
+            shm_data: JSON string with SHM parameters
+                     Example: '{"type": "spring", "mass": 0.5, "k": 200}'
+                     Example: '{"type": "pendulum", "length": 1.0}'
+                     Example: '{"amplitude": 0.1, "omega": 10, "time": 0.5}'
+                     Units: mass (kg), k (N/m), length (m), amplitude (m), omega (rad/s), time (s)
+
+        Returns:
+            str: Complete SHM analysis with period, frequency, and motion equations
+        """
+        try:
+            data = json.loads(shm_data) if isinstance(shm_data, str) else shm_data
+
+            shm_type = data.get("type", "spring").lower()
+            g = 9.81  # m/s²
+
+            result = """
+Simple Harmonic Motion Analysis:
+================================
+
+"""
+            if shm_type == "spring" or "k" in data:
+                m = float(data.get("mass", data.get("m", 1)))
+                k = float(data.get("k", data.get("spring_constant", 100)))
+
+                omega = math.sqrt(k / m)
+                T = 2 * math.pi / omega
+                f = 1 / T
+
+                result += f"""Spring-Mass System:
+- Mass: m = {m:.4f} kg
+- Spring constant: k = {k:.2f} N/m
+
+Angular Frequency: ω = √(k/m) = √({k:.2f}/{m:.4f}) = {omega:.4f} rad/s
+Period: T = 2π/ω = 2π/{omega:.4f} = {T:.4f} s
+Frequency: f = 1/T = {f:.4f} Hz
+
+"""
+            elif shm_type == "pendulum" or "length" in data:
+                L = float(data.get("length", data.get("L", 1)))
+
+                omega = math.sqrt(g / L)
+                T = 2 * math.pi / omega
+                f = 1 / T
+
+                result += f"""Simple Pendulum (small angle):
+- Length: L = {L:.4f} m
+- Gravity: g = {g:.2f} m/s²
+
+Angular Frequency: ω = √(g/L) = √({g:.2f}/{L:.4f}) = {omega:.4f} rad/s
+Period: T = 2π√(L/g) = 2π√({L:.4f}/{g:.2f}) = {T:.4f} s
+Frequency: f = 1/T = {f:.4f} Hz
+
+Note: Valid for small angles (θ < 15°)
+"""
+            # Position, velocity, acceleration at time t
+            A = float(data.get("amplitude", data.get("A", 0.1)))
+            t = data.get("time", data.get("t", None))
+            phi = float(data.get("phase", data.get("phi", 0)))
+
+            result += f"""
+Amplitude: A = {A:.4f} m
+Maximum velocity: v_max = Aω = {A:.4f} × {omega:.4f} = {A*omega:.4f} m/s
+Maximum acceleration: a_max = Aω² = {A:.4f} × {omega:.4f}² = {A*omega**2:.4f} m/s²
+
+Motion Equations:
+x(t) = A cos(ωt + φ) = {A:.4f} cos({omega:.4f}t + {phi})
+v(t) = -Aω sin(ωt + φ) = -{A*omega:.4f} sin({omega:.4f}t + {phi})
+a(t) = -Aω² cos(ωt + φ) = -{A*omega**2:.4f} cos({omega:.4f}t + {phi})
+"""
+            if t is not None:
+                t = float(t)
+                x = A * math.cos(omega * t + phi)
+                v = -A * omega * math.sin(omega * t + phi)
+                a = -A * omega**2 * math.cos(omega * t + phi)
+
+                result += f"""
+At t = {t:.4f} s:
+- Position: x = {x:.6f} m
+- Velocity: v = {v:.6f} m/s
+- Acceleration: a = {a:.6f} m/s²
+"""
+            result += """
+Energy in SHM:
+- Total Energy: E = ½kA² = ½mω²A² (constant)
+- KE = ½mv² = ½mω²(A² - x²)
+- PE = ½kx² = ½mω²x²
+- At equilibrium: KE = max, PE = 0
+- At amplitude: KE = 0, PE = max
+
+Applications:
+- Mechanical oscillators, clocks
+- Musical instruments
+- Molecular vibrations
+- Electrical LC circuits
+"""
+            return result
+
+        except Exception as e:
+            return f"Error in SHM analysis: {str(e)}"
+
     logger.info(
         f'{NAME} MCP Server at {host}:{port} and transport {transport}'
     )

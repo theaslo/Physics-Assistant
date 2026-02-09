@@ -180,11 +180,12 @@ class DatabaseAPIClient:
 
 class EnhancedSessionDataManager:
     """Enhanced session data manager with database integration"""
-    
+
     def __init__(self, api_base_url: str = "http://localhost:8001"):
         self.session_id = self._get_or_create_session_id()
-        self.db_client = DatabaseAPIClient(api_base_url)
-        
+        # Use cached db client to avoid repeated connection tests
+        self.db_client = get_cached_db_client(api_base_url)
+
         # Initialize user session in database if API is available
         if self.db_client.is_connected:
             self._sync_with_database()
@@ -196,13 +197,17 @@ class EnhancedSessionDataManager:
         return st.session_state['session_id']
     
     def _sync_with_database(self):
-        """Sync session with database"""
+        """Sync session with database (only once per session)"""
+        # Skip if already synced
+        if st.session_state.get('db_session_id'):
+            return
+
         try:
             # Get or create user ID for database operations
             user_info = st.session_state.get('user_info', {})
             if user_info and user_info.get('id'):
                 user_id = user_info['id']
-                
+
                 # Create database session if needed
                 db_session_id = self.db_client.create_session(
                     user_id=user_id,
@@ -212,7 +217,7 @@ class EnhancedSessionDataManager:
                         'created_via': 'streamlit_ui'
                     }
                 )
-                
+
                 if db_session_id:
                     st.session_state['db_session_id'] = db_session_id
                     logger.info(f"✅ Database session synced: {db_session_id}")
@@ -381,7 +386,15 @@ class EnhancedSessionDataManager:
         
         return base_data
 
-# Factory function for easy migration from existing code
-def get_data_manager(api_base_url: str = "http://localhost:8001") -> EnhancedSessionDataManager:
-    """Get enhanced data manager with database integration"""
-    return EnhancedSessionDataManager(api_base_url)
+@st.cache_resource
+def get_cached_db_client(_api_base_url: str = None) -> DatabaseAPIClient:
+    """Get or create a cached DatabaseAPIClient singleton (cached across reruns)"""
+    from config import Config
+    url = _api_base_url or getattr(Config, 'DATABASE_API_URL', "http://localhost:8001")
+    return DatabaseAPIClient(url)
+
+
+@st.cache_resource
+def get_data_manager(_api_base_url: str = "http://localhost:8001") -> EnhancedSessionDataManager:
+    """Get cached data manager with database integration (cached across reruns)"""
+    return EnhancedSessionDataManager(_api_base_url)

@@ -46,6 +46,21 @@ def main(command, host, port, transport) -> None:
     elif command == 'circuit-server':
         from physics_mcp_tools.circuit_mcp_server import serve
         serve(host, port, transport)
+    elif command == 'thermodynamics-server':
+        from physics_mcp_tools.thermodynamics_mcp_server import serve
+        serve(host, port, transport)
+    elif command == 'waves-server':
+        from physics_mcp_tools.waves_mcp_server import serve
+        serve(host, port, transport)
+    elif command == 'electromagnetism-server':
+        from physics_mcp_tools.electromagnetism_mcp_server import serve
+        serve(host, port, transport)
+    elif command == 'optics-server':
+        from physics_mcp_tools.optics_mcp_server import serve
+        serve(host, port, transport)
+    elif command == 'modern-physics-server':
+        from physics_mcp_tools.modern_physics_mcp_server import serve
+        serve(host, port, transport)
     else:
         raise ValueError(f'Unknown run option: {command}')
 

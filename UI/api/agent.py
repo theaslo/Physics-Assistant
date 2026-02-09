@@ -531,8 +531,74 @@ class CombinedPhysicsAgent:
                 "execution_time_ms": execution_time_ms
             }
 
+    def _is_physics_related(self, problem: str) -> bool:
+        """Check if the problem is related to physics."""
+        problem_lower = problem.lower()
+
+        # Physics-related keywords by category
+        physics_keywords = [
+            # Mechanics
+            "force", "mass", "acceleration", "velocity", "speed", "distance",
+            "displacement", "momentum", "impulse", "collision", "friction",
+            "spring", "gravity", "weight", "newton", "kg", "m/s", "n/m",
+            # Kinematics
+            "motion", "projectile", "trajectory", "fall", "drop", "throw",
+            "launch", "accelerate", "decelerate", "rest", "moving",
+            # Energy
+            "energy", "work", "power", "kinetic", "potential", "joule",
+            "conservation", "mechanical",
+            # Rotation
+            "angular", "rotation", "torque", "moment", "inertia", "radius",
+            "circular", "centripetal", "rpm", "rad/s", "wheel", "spin",
+            # Math related to physics
+            "equation", "solve", "calculate", "find", "determine",
+            "quadratic", "vector", "component", "angle", "degree",
+            # Units
+            "meter", "second", "kilogram", "newton", "joule", "watt",
+        ]
+
+        # Check for physics keywords
+        if any(keyword in problem_lower for keyword in physics_keywords):
+            return True
+
+        # Check for numeric values with units (likely physics)
+        import re
+        unit_patterns = [
+            r'\d+\s*(m|kg|s|n|j|w|rad)',  # Basic units
+            r'\d+\s*(m/s|km/h|rad/s|n/m)',  # Compound units
+            r'\d+\s*°',  # Degrees
+        ]
+        for pattern in unit_patterns:
+            if re.search(pattern, problem_lower):
+                return True
+
+        return False
+
     async def _solve_with_direct_tools(self, problem: str, rag_context: Optional[Dict[str, Any]] = None) -> str:
         """Solve using direct tool calls (working_forces_agent.py approach)"""
+
+        # First check if this is a physics-related question
+        if not self._is_physics_related(problem):
+            agent_specialty = {
+                "forces_agent": "forces, Newton's laws, springs, friction, and equilibrium",
+                "kinematics_agent": "motion, velocity, acceleration, projectile motion, and free fall",
+                "math_agent": "mathematical calculations, equations, and trigonometry",
+                "momentum_agent": "momentum, impulse, and collisions",
+                "energy_agent": "work, energy, power, and conservation of energy",
+                "angular_motion_agent": "rotational motion, torque, and angular momentum"
+            }.get(self.agent_id, "physics problems")
+
+            return (
+                f"❌ **No appropriate tool found**\n\n"
+                f"I am the {self.agent_id.replace('_', ' ').title()}, specialized in {agent_specialty}.\n\n"
+                f"Your question does not appear to be a physics problem that I can solve with my available MCP tools.\n\n"
+                f"**What I can help with:**\n"
+                f"- Problems involving {agent_specialty}\n"
+                f"- Calculations with physical quantities and units\n"
+                f"- Step-by-step physics problem solving\n\n"
+                f"Please rephrase your question as a physics problem, or try a different agent."
+            )
+
         if self.agent_id == "forces_agent":
             return await self._solve_forces_problem_direct(problem)
         elif self.agent_id == "kinematics_agent":
@@ -568,29 +634,35 @@ class CombinedPhysicsAgent:
     async def _solve_forces_problem_direct(self, problem: str) -> str:
         """Direct tool solving for forces problems"""
         problem_lower = problem.lower()
-        
+
+        # Newton's 2nd Law (F=ma) - detect acceleration/force/mass calculations
+        if any(word in problem_lower for word in ["acceleration", "accelerate", "f=ma", "f = ma"]) or \
+           (any(word in problem_lower for word in ["force", "mass", "kg", "box", "object"]) and
+            any(word in problem_lower for word in ["find", "calculate", "what", "determine"])):
+            return await self._call_newton_second_law_tool(problem)
+
         # 2D Force Addition
-        if any(word in problem_lower for word in ["add", "forces"]) and ("°" in problem or "degree" in problem_lower):
+        elif any(word in problem_lower for word in ["add", "resultant"]) and ("°" in problem or "degree" in problem_lower):
             return await self._call_forces_2d_tool(problem)
-            
+
         # Spring Force
         elif any(word in problem_lower for word in ["spring", "hooke"]):
             return await self._call_spring_tool(problem)
-            
+
         # Force Components
         elif any(word in problem_lower for word in ["component", "resolve", "break"]):
             return await self._call_component_tool(problem)
-            
+
         # Equilibrium
         elif any(word in problem_lower for word in ["equilibrium", "balance"]):
             return await self._call_equilibrium_tool(problem)
-            
+
         # Free Body Diagram
         elif any(word in problem_lower for word in ["free body", "fbd", "diagram"]):
             return await self._call_fbd_tool(problem)
-            
+
         else:
-            return await self._call_forces_2d_tool(problem)  # Default
+            return await self._call_newton_second_law_tool(problem)  # Default to Newton's 2nd law
 
     async def _call_forces_2d_tool(self, problem: str) -> str:
         """Call 2D force addition tool directly"""
@@ -615,19 +687,92 @@ class CombinedPhysicsAgent:
         try:
             if "calculate_spring_force_tool" not in self.tool_dict:
                 return "❌ calculate_spring_force_tool not available"
-            
+
             k, displacement = self._parse_spring_params(problem)
-            
+
             tool = self.tool_dict["calculate_spring_force_tool"]
             result = await tool.ainvoke({
-                "spring_constant": k,
-                "displacement": displacement
+                "spring_data": json.dumps({"spring_constant": k, "displacement": displacement})
             })
-            
+
             return f"🎯 **SPRING FORCE SOLUTION**\\n\\n{result}\\n\\n✅ **Calculation completed using MCP tools**"
-            
+
         except Exception as e:
             return f"❌ Error in spring force calculation: {e}"
+
+    async def _call_newton_second_law_tool(self, problem: str) -> str:
+        """Call Newton's 2nd law tool directly (F=ma)"""
+        try:
+            if "newton_second_law" not in self.tool_dict:
+                return "❌ newton_second_law tool not available"
+
+            force, mass, acceleration = self._parse_newton_params(problem)
+
+            # Build the data dict with known values
+            newton_data = {}
+            if force is not None:
+                newton_data["force"] = force
+            if mass is not None:
+                newton_data["mass"] = mass
+            if acceleration is not None:
+                newton_data["acceleration"] = acceleration
+
+            tool = self.tool_dict["newton_second_law"]
+            result = await tool.ainvoke({
+                "newton_data": json.dumps(newton_data)
+            })
+
+            return f"🎯 **NEWTON'S 2ND LAW SOLUTION**\\n\\n{result}\\n\\n✅ **Calculation completed using MCP tools**"
+
+        except Exception as e:
+            return f"❌ Error in Newton's 2nd law calculation: {e}"
+
+    def _parse_newton_params(self, problem: str) -> tuple:
+        """Parse force, mass, and acceleration from problem text"""
+        import re
+        problem_lower = problem.lower()
+
+        force = None
+        mass = None
+        acceleration = None
+
+        # Parse force (N or newtons)
+        force_patterns = [
+            r'(\d+(?:\.\d+)?)\s*n\b(?!ewton)',  # 50N or 50 N (not followed by ewton)
+            r'(\d+(?:\.\d+)?)\s*newtons?',       # 50 newtons
+            r'force\s*(?:of|=|is)?\s*(\d+(?:\.\d+)?)',  # force of 50, force = 50
+        ]
+        for pattern in force_patterns:
+            match = re.search(pattern, problem_lower)
+            if match:
+                force = float(match.group(1))
+                break
+
+        # Parse mass (kg or kilograms)
+        mass_patterns = [
+            r'(\d+(?:\.\d+)?)\s*kg',             # 10kg or 10 kg
+            r'(\d+(?:\.\d+)?)\s*kilogram',       # 10 kilogram
+            r'mass\s*(?:of|=|is)?\s*(\d+(?:\.\d+)?)',  # mass of 10, mass = 10
+        ]
+        for pattern in mass_patterns:
+            match = re.search(pattern, problem_lower)
+            if match:
+                mass = float(match.group(1))
+                break
+
+        # Parse acceleration (m/s² or m/s^2)
+        accel_patterns = [
+            r'(\d+(?:\.\d+)?)\s*m/s[²2]',        # 5 m/s² or 5m/s2
+            r'acceleration\s*(?:of|=|is)?\s*(\d+(?:\.\d+)?)',  # acceleration of 5
+            r'accelerates?\s*(?:at)?\s*(\d+(?:\.\d+)?)',  # accelerates at 5
+        ]
+        for pattern in accel_patterns:
+            match = re.search(pattern, problem_lower)
+            if match:
+                acceleration = float(match.group(1))
+                break
+
+        return force, mass, acceleration
 
     async def _call_component_tool(self, problem: str) -> str:
         """Call force component resolution tool"""

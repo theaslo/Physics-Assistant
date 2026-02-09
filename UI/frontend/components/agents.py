@@ -1,14 +1,20 @@
 import streamlit as st
 from typing import Optional, Dict
 from config import Config
-from services.api_client import PhysicsAPIClient
+from services.api_client import get_cached_api_client
 
 class AgentManager:
     """Manages physics agent selection and configuration"""
-    
+
     def __init__(self):
-        self.api_client = PhysicsAPIClient()
-        self.agents = self._get_available_agents()
+        self.api_client = get_cached_api_client()
+        self.agents = self._get_cached_agents()
+
+    def _get_cached_agents(self) -> Dict[str, Dict]:
+        """Get agents from session cache or fetch once"""
+        if 'cached_agents' not in st.session_state:
+            st.session_state['cached_agents'] = self._get_available_agents()
+        return st.session_state['cached_agents']
     
     def _get_available_agents(self) -> Dict[str, Dict]:
         """Get available agents from API or fallback to config"""
@@ -104,36 +110,19 @@ class AgentManager:
         return selected_agent
     
     def _show_agent_capabilities(self, agent_id: str):
-        """Show capabilities for selected agent"""
-        # First try to get capabilities from API
-        api_capabilities = None
-        if self.api_client.is_connected():
-            try:
-                result = self.api_client.get_agent_capabilities(agent_id)
-                if 'capabilities' in result:
-                    api_capabilities = result.get('available_tools', [])
-            except Exception:
-                pass
-        
-        # Get fallback capabilities
-        fallback_capabilities = self._get_agent_capabilities(agent_id)
-        
-        # Use API capabilities if available, otherwise fallback
-        capabilities = fallback_capabilities
-        
+        """Show capabilities for selected agent (uses local fallback for instant switching)"""
+        # Get fallback capabilities (fast - no API call)
+        capabilities = self._get_agent_capabilities(agent_id)
+
         if capabilities:
             with st.expander(f"💡 {self.agents[agent_id]['name']} Capabilities"):
-                # Show API connection status
+                # Show connection status
                 if self.api_client.is_connected():
                     st.success("🟢 Connected to API server")
-                    if api_capabilities:
-                        st.write("**Available MCP Tools:**")
-                        for tool in api_capabilities:
-                            st.write(f"• {tool}")
-                        st.write("**Physics Capabilities:**")
                 else:
-                    st.warning("🟡 API server offline - showing general capabilities")
-                
+                    st.warning("🟡 API server offline")
+
+                st.write("**Physics Capabilities:**")
                 for capability in capabilities:
                     st.write(f"• {capability}")
     

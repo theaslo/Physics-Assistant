@@ -16,6 +16,12 @@ from config import Config
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+@st.cache_resource
+def get_cached_api_client() -> "PhysicsAPIClient":
+    """Get or create a cached PhysicsAPIClient singleton (cached across reruns)"""
+    return PhysicsAPIClient()
+
+
 class PhysicsAPIClient:
     """Client for communicating with the Physics Assistant FastAPI server"""
 
@@ -29,33 +35,30 @@ class PhysicsAPIClient:
             'Accept': 'application/json'
         })
         
-        # Initialize database client for logging
+        # Initialize database client for logging (use cached instance)
         self.db_client = None
         if Config.DATABASE_LOGGING_ENABLED:
             try:
-                from .database_client import DatabaseAPIClient
-                self.db_client = DatabaseAPIClient(Config.DATABASE_API_URL)
+                from .database_client import get_cached_db_client
+                self.db_client = get_cached_db_client(Config.DATABASE_API_URL)
                 logger.info("✅ Database logging enabled for API client")
             except Exception as e:
                 logger.warning(f"⚠️ Failed to initialize database logging: {e}")
         
-        # Test connection on initialization
-        self._test_connection()
-    
-    def _test_connection(self):
+        # Test connection on initialization and store result in object
+        self._connected = self._test_connection()
+
+    def _test_connection(self) -> bool:
         """Test connection to API server"""
         try:
             response = self.session.get(f"{self.base_url}/health", timeout=5)
-            if response.status_code == 200:
-                st.session_state['api_connected'] = True
-            else:
-                st.session_state['api_connected'] = False
+            return response.status_code == 200
         except requests.exceptions.RequestException:
-            st.session_state['api_connected'] = False
-    
+            return False
+
     def is_connected(self) -> bool:
         """Check if API is connected"""
-        return st.session_state.get('api_connected', False)
+        return self._connected
     
     def _log_api_interaction(self, 
                            operation: str,
@@ -418,20 +421,20 @@ class PhysicsAPIClient:
         """
         try:
             response = self.session.get(f"{self.base_url}/health", timeout=5)
-            
+
             if response.status_code == 200:
                 result = response.json()
-                st.session_state['api_connected'] = True
+                self._connected = True
                 return result
             else:
-                st.session_state['api_connected'] = False
+                self._connected = False
                 return {
                     'status': 'unhealthy',
                     'error': f"HTTP {response.status_code}"
                 }
-                
+
         except requests.exceptions.RequestException as e:
-            st.session_state['api_connected'] = False
+            self._connected = False
             return {
                 'status': 'unhealthy',
                 'error': str(e)

@@ -41,9 +41,24 @@ case $MCP_SERVICE in
     "circuit")
         cd /app/mcp_tools && exec python -m physics_mcp_tools --run circuit-server --host $MCP_HOST --port $MCP_PORT --transport $MCP_TRANSPORT
         ;;
+    "thermodynamics")
+        cd /app/mcp_tools && exec python -m physics_mcp_tools --run thermodynamics-server --host $MCP_HOST --port $MCP_PORT --transport $MCP_TRANSPORT
+        ;;
+    "waves")
+        cd /app/mcp_tools && exec python -m physics_mcp_tools --run waves-server --host $MCP_HOST --port $MCP_PORT --transport $MCP_TRANSPORT
+        ;;
+    "electromagnetism")
+        cd /app/mcp_tools && exec python -m physics_mcp_tools --run electromagnetism-server --host $MCP_HOST --port $MCP_PORT --transport $MCP_TRANSPORT
+        ;;
+    "optics")
+        cd /app/mcp_tools && exec python -m physics_mcp_tools --run optics-server --host $MCP_HOST --port $MCP_PORT --transport $MCP_TRANSPORT
+        ;;
+    "modern-physics")
+        cd /app/mcp_tools && exec python -m physics_mcp_tools --run modern-physics-server --host $MCP_HOST --port $MCP_PORT --transport $MCP_TRANSPORT
+        ;;
     *)
         echo "Unknown MCP service: $MCP_SERVICE"
-        echo "Available services: forces, kinematics, math, energy, momentum, angular-motion, circuit"
+        echo "Available services: forces, kinematics, math, energy, momentum, angular-motion, circuit, thermodynamics, waves, electromagnetism, optics, modern-physics"
         exit 1
         ;;
 esac

@@ -5,6 +5,8 @@ import json
 import asyncio
 import aiohttp
 import logging
+import functools
+import inspect
 from datetime import datetime
 from typing import Dict, Any, Optional
 from contextlib import asynccontextmanager
@@ -198,6 +200,7 @@ def create_tool_wrapper(db_logger: DatabaseLogger, tool_name: str):
         Decorator function that wraps the original tool
     """
     def decorator(original_tool):
+        @functools.wraps(original_tool)
         async def wrapped_tool(*args, **kwargs):
             start_time = datetime.utcnow()
             success = True
@@ -221,7 +224,6 @@ def create_tool_wrapper(db_logger: DatabaseLogger, tool_name: str):
 
                 # Combine args and kwargs for logging
                 # Get function signature to map args to parameter names
-                import inspect
                 try:
                     sig = inspect.signature(original_tool)
                     bound_args = sig.bind(*args, **kwargs)
@@ -245,10 +247,8 @@ def create_tool_wrapper(db_logger: DatabaseLogger, tool_name: str):
                     )
                 )
 
-        # Preserve original tool metadata
-        wrapped_tool.__name__ = original_tool.__name__
-        wrapped_tool.__doc__ = original_tool.__doc__
-        wrapped_tool.__annotations__ = original_tool.__annotations__
+        # Preserve function signature for langchain-mcp-adapters compatibility
+        wrapped_tool.__signature__ = inspect.signature(original_tool)
 
         return wrapped_tool
     return decorator

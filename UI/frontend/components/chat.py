@@ -2,14 +2,14 @@ import streamlit as st
 import time
 from typing import List, Dict, Optional
 from config import Config
-from services.api_client import PhysicsAPIClient
+from services.api_client import get_cached_api_client
 
 class ChatInterface:
     """Manages the chat interface for physics assistance"""
-    
+
     def __init__(self, agent_id: str):
         self.agent_id = agent_id
-        self.api_client = PhysicsAPIClient()
+        self.api_client = get_cached_api_client()
         self.agent_info = self.api_client.get_agent_info(agent_id)
     
     def render(self):
@@ -87,20 +87,22 @@ class ChatInterface:
     
     def _get_example_questions(self) -> str:
         """Get example questions for the current agent"""
-        # Try to get example questions from agent capabilities (from API)
-        try:
-            capabilities = self.api_client.get_agent_capabilities(self.agent_id)
-            if capabilities and 'metadata' in capabilities:
-                examples = capabilities.get('metadata', {}).get('example_problems', [])
-                if examples:
-                    # Show first 5 examples
-                    formatted_examples = []
-                    for i, example in enumerate(examples[:5], 1):
-                        formatted_examples.append(f"{i}. *{example}*")
-                    return "\n".join(formatted_examples)
-        except Exception:
-            # If API fails, continue to fallback
-            pass
+        # Use cached examples to avoid repeated API calls
+        cache_key = f'example_questions_{self.agent_id}'
+        if cache_key in st.session_state:
+            cached = st.session_state[cache_key]
+            if cached:
+                return cached
+
+        # Try to get from fallback first (fast path - no API call)
+        fallback_result = self._get_fallback_examples()
+
+        # Cache and return the fallback (API is too slow for UI responsiveness)
+        st.session_state[cache_key] = fallback_result
+        return fallback_result
+
+    def _get_fallback_examples(self) -> str:
+        """Get fallback example questions without API call"""
         
         # Fallback examples for each agent type
         example_questions = {

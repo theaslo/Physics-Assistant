@@ -1,2 +1,5 @@
 .venv/
 __pycache__/
+
+# External repos - do not push
+strands_agent_github/

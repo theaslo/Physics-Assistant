@@ -389,17 +389,23 @@ def serve(host, port, transport):  # noqa: PLR0915
 
     @mcp.tool()
     @create_tool_wrapper(db_logger, "calculate_spring_force_tool")
-    async def calculate_spring_force_tool(spring_constant: float, displacement: float) -> str:
+    async def calculate_spring_force_tool(spring_data: str) -> str:
         """Calculate spring force using Hooke's Law.
 
         Args:
-            spring_constant: Spring constant k in N/m
-            displacement: Displacement from equilibrium position in meters (positive = stretched, negative = compressed)
+            spring_data: JSON string with spring_constant (k in N/m) and displacement (in meters).
+                        Example: '{"spring_constant": 200, "displacement": 0.1}'
+                        Positive displacement = stretched, negative = compressed
 
         Returns:
             str: Spring force calculation and explanation
         """
         try:
+            # Parse JSON input
+            data = json.loads(spring_data) if isinstance(spring_data, str) else spring_data
+            spring_constant = float(data.get("spring_constant", data.get("k", 0)))
+            displacement = float(data.get("displacement", data.get("x", 0)))
+
             spring_force = calculate_spring_force(spring_constant, displacement)
 
             result = f"""
@@ -520,6 +526,105 @@ def serve(host, port, transport):  # noqa: PLR0915
 
             return result
 
+        except Exception as e:
+            return f"Error in calculation: {str(e)}"
+
+    @mcp.tool()
+    @create_tool_wrapper(db_logger, "newton_second_law")
+    async def newton_second_law(newton_data: str) -> str:
+        """Apply Newton's Second Law (F = ma) to find force, mass, or acceleration.
+
+        Args:
+            newton_data: JSON string with known values. Provide any 2 of: force, mass, acceleration.
+                        Example: '{"force": 50, "mass": 10}' to find acceleration
+                        Example: '{"mass": 10, "acceleration": 5}' to find force
+                        Example: '{"force": 50, "acceleration": 5}' to find mass
+                        Units: force (N), mass (kg), acceleration (m/s²)
+
+        Returns:
+            str: Newton's 2nd law calculation with the unknown quantity
+        """
+        try:
+            # Parse JSON input
+            data = json.loads(newton_data) if isinstance(newton_data, str) else newton_data
+
+            force = data.get("force", data.get("f", data.get("F", None)))
+            mass = data.get("mass", data.get("m", None))
+            acceleration = data.get("acceleration", data.get("a", None))
+
+            # Convert to float if provided
+            if force is not None:
+                force = float(force)
+            if mass is not None:
+                mass = float(mass)
+            if acceleration is not None:
+                acceleration = float(acceleration)
+
+            # Count known values
+            known_count = sum(1 for v in [force, mass, acceleration] if v is not None)
+
+            if known_count < 2:
+                return "Error: Need at least 2 known values (force, mass, or acceleration) to solve"
+
+            result = """
+Newton's Second Law Analysis (F = ma):
+=====================================
+
+"""
+
+            # Show given values
+            result += "Given:\n"
+            if force is not None:
+                result += f"- Net Force (F): {force:.2f} N\n"
+            if mass is not None:
+                result += f"- Mass (m): {mass:.2f} kg\n"
+            if acceleration is not None:
+                result += f"- Acceleration (a): {acceleration:.2f} m/s²\n"
+
+            result += "\nNewton's Second Law: F = ma\n\n"
+
+            # Solve for unknown
+            if acceleration is None:
+                # a = F/m
+                acceleration = force / mass
+                result += f"Solving for acceleration:\n"
+                result += f"a = F / m\n"
+                result += f"a = {force:.2f} N / {mass:.2f} kg\n"
+                result += f"a = {acceleration:.2f} m/s²\n\n"
+                result += f"Result: The object accelerates at {acceleration:.2f} m/s²\n"
+                if acceleration > 0:
+                    result += f"Direction: In the direction of the net force"
+                elif acceleration < 0:
+                    result += f"Direction: Opposite to the positive direction"
+                else:
+                    result += f"Note: Zero acceleration means constant velocity (equilibrium)"
+
+            elif force is None:
+                # F = ma
+                force = mass * acceleration
+                result += f"Solving for force:\n"
+                result += f"F = m × a\n"
+                result += f"F = {mass:.2f} kg × {acceleration:.2f} m/s²\n"
+                result += f"F = {force:.2f} N\n\n"
+                result += f"Result: The net force required is {force:.2f} N"
+
+            elif mass is None:
+                # m = F/a
+                if acceleration == 0:
+                    return "Error: Cannot determine mass when acceleration is zero (any mass would work)"
+                mass = force / acceleration
+                result += f"Solving for mass:\n"
+                result += f"m = F / a\n"
+                result += f"m = {force:.2f} N / {acceleration:.2f} m/s²\n"
+                result += f"m = {mass:.2f} kg\n\n"
+                result += f"Result: The object has a mass of {mass:.2f} kg"
+
+            return result
+
+        except json.JSONDecodeError:
+            return "Error: Invalid JSON format. Example: '{\"force\": 50, \"mass\": 10}'"
+        except ZeroDivisionError:
+            return "Error: Cannot divide by zero. Check your input values."
         except Exception as e:
             return f"Error in calculation: {str(e)}"
 

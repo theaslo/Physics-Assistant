@@ -71,9 +71,10 @@ COPY docker/mcp/start.sh /app/start.sh
 RUN chmod +x /app/start.sh && \
     chown mcp:mcp /app/start.sh
 
-# Health check (will be customized per service)
+# Health check - uses MCP_PORT env var (set in docker-compose)
+# Note: MCP servers don't have /health, so we check if port is open
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD curl -f http://localhost:10100/health || nc -z localhost 10100 || exit 1
+    CMD sh -c 'nc -z localhost ${MCP_PORT:-10100}' || exit 1
 
 # Switch to non-root user
 USER mcp
