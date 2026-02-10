@@ -40,5 +40,6 @@ EXPOSE 9090
 # Volume for data persistence
 VOLUME ["/prometheus/data"]
 
-# Set the startup command
+# Set the startup command with shell
+ENTRYPOINT ["/bin/sh"]
 CMD ["/start.sh"]

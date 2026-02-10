@@ -415,8 +415,12 @@ const DashboardSidebar: React.FC<DashboardSidebarProps> = ({ onItemClick }) => {
         {/* Quick Stats */}
         {renderStatsCard()}
 
-        {/* Connection Status */}
-        {renderConnectionStatus()}
+        {/* Connection Status - Hidden: WebSocket not implemented in dashboard-api
+         * TODO: Implement WebSocket endpoint in dashboard-api for real-time updates
+         * See: dashboard-ui/src/services/websocket-client.ts for client implementation
+         * Message types: metrics_update, alert, student_progress, heartbeat
+         */}
+        {/* {renderConnectionStatus()} */}
       </Box>
     </Box>
   );

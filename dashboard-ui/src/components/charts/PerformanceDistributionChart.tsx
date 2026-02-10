@@ -50,7 +50,14 @@ const PerformanceDistributionChart: React.FC<PerformanceDistributionChartProps> 
     return [];
   }, [distribution]);
 
-  const maxValue = Math.max(...chartData.map(item => item.value));
+  // Early return if no data
+  if (chartData.length === 0) {
+    return (
+      <Box sx={{ width: '100%', height: '320px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Typography variant="body2" color="textSecondary">No distribution data available</Typography>
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ width: '100%', height: '320px' }}>

@@ -34,5 +34,5 @@ EXPOSE 9093
 # Volume for data persistence
 VOLUME ["/alertmanager/data"]
 
-# Start Alertmanager
-CMD ["alertmanager", "--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager/data", "--web.listen-address=0.0.0.0:9093", "--cluster.listen-address=0.0.0.0:9094"]
+# Start Alertmanager (use args only since base image has alertmanager as entrypoint)
+CMD ["--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager/data", "--web.listen-address=0.0.0.0:9093", "--cluster.listen-address="]

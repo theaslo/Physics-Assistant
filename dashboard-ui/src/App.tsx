@@ -51,9 +51,9 @@ function App() {
         <CssBaseline />
         <Router>
           <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-            {/* Connection Status */}
-            <ConnectionStatus />
-            
+            {/* Connection Status - Hidden: WebSocket not implemented in dashboard-api */}
+            {/* <ConnectionStatus /> */}
+
             {/* Main Application */}
             <DashboardLayout>
               <Routes>

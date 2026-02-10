@@ -60,7 +60,19 @@ import { exportClassData } from '../utils/export-helpers';
 
 const ClassOverview: React.FC = () => {
   const queryClient = useQueryClient();
-  const { filters, setFilters, loading, error, setLoading, setError } = useDashboardStore();
+  const {
+    loading,
+    errors,
+    setLoading,
+    setError,
+    setTimeRange,
+    ui: { selectedTimeRange }
+  } = useDashboardStore();
+
+  // Build filters from UI state
+  const filters = React.useMemo(() => ({
+    timeRange: { preset: selectedTimeRange },
+  }), [selectedTimeRange]);
   
   // Local state
   const [selectedClasses, setSelectedClasses] = useState<string[]>(['class_001']);
@@ -123,10 +135,9 @@ const ClassOverview: React.FC = () => {
   };
 
   const handleTimeRangeChange = (newTimeRange: Partial<TimeRangeRequest>) => {
-    setFilters({
-      ...filters,
-      timeRange: { ...filters.timeRange, ...newTimeRange }
-    });
+    if (newTimeRange.preset) {
+      setTimeRange(newTimeRange.preset as any);
+    }
   };
 
   const handleClassChange = (classes: string[]) => {
@@ -155,10 +166,10 @@ const ClassOverview: React.FC = () => {
   }
 
   // Render error state
-  if (overviewError || error) {
+  if (overviewError || errors.classOverview) {
     return (
       <Alert severity="error" sx={{ m: 2 }}>
-        Error loading class data: {overviewError?.message || error}
+        Error loading class data: {overviewError?.message || errors.classOverview}
       </Alert>
     );
   }
@@ -315,9 +326,10 @@ const ClassOverview: React.FC = () => {
                 { name: 'Needs Help', value: perfDistribution?.needs_help || 0, color: '#f44336' },
                 { name: 'At Risk', value: perfDistribution?.at_risk || 0, color: '#d32f2f' },
               ]}
-              xKey="name"
-              yKey="value"
-              showLabels={true}
+              categoryKey="name"
+              dataKey="value"
+              title="Performance Categories"
+              height={280}
             />
           </Paper>
         </Grid>

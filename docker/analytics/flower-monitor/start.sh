@@ -11,11 +11,9 @@ while ! nc -z ${REDIS_HOST:-redis} ${REDIS_PORT:-6379}; do
 done
 echo "Redis is ready!"
 
-# Start Flower monitoring
+# Start Flower monitoring (use celery flower command)
 echo "Starting Flower on port 5555..."
-exec flower \
-    --broker=${CELERY_BROKER_URL} \
+exec celery --broker=${CELERY_BROKER_URL} flower \
     --port=5555 \
     --address=0.0.0.0 \
-    --basic_auth=admin:physics_flower_2024 \
-    --url_prefix=flower
+    --basic_auth=admin:physics_flower_2024

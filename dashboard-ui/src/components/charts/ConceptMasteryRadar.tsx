@@ -17,11 +17,11 @@ interface ConceptMasteryRadarProps {
 }
 
 const ConceptMasteryRadar: React.FC<ConceptMasteryRadarProps> = ({ concepts }) => {
-  // Transform data for radar chart
-  const radarData = concepts.map(concept => ({
-    concept: concept.concept.replace(/_/g, ' ').toUpperCase(),
-    mastery: Math.round(concept.mastery_score * 100),
-    confidence: Math.round(concept.confidence[0] * 100), // Lower bound of confidence interval
+  // Transform data for radar chart (handle both API formats)
+  const radarData = concepts.map((concept: any) => ({
+    concept: (concept.concept || concept.name || 'Unknown').replace(/_/g, ' ').toUpperCase(),
+    mastery: Math.round((concept.mastery_score ?? concept.mastery ?? 0) * 100),
+    confidence: Math.round((Array.isArray(concept.confidence) ? concept.confidence[0] : concept.confidence ?? 0) * 100),
   }));
 
   return (

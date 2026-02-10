@@ -87,7 +87,10 @@ const formatMetricLabel = (metric: MetricType): string => {
   return labels[metric] || metric;
 };
 
-const formatMetricValue = (value: number, metric: MetricType): string => {
+const formatMetricValue = (value: number | null | undefined, metric: MetricType): string => {
+  if (value == null || typeof value !== 'number' || isNaN(value)) {
+    return '0';
+  }
   switch (metric) {
     case 'success_rate':
     case 'error_rate':
@@ -188,6 +191,9 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
   const theme = useTheme();
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
 
+  // Ensure metrics is always an array
+  const safeMetrics = metrics || [];
+
   // ============================================================================
   // Computed Values
   // ============================================================================
@@ -201,11 +207,11 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
   }, [data]);
 
   const colors = useMemo(() => {
-    if (customColors && customColors.length >= metrics.length) {
+    if (customColors && customColors.length >= safeMetrics.length) {
       return customColors;
     }
-    return metrics.map((_, index) => getChartColor(index));
-  }, [metrics, customColors]);
+    return safeMetrics.map((_, index) => getChartColor(index));
+  }, [safeMetrics, customColors]);
 
   const hasData = chartData.length > 0;
 
@@ -247,7 +253,7 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           {/* Metric chips */}
           <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-            {metrics.map((metric, index) => (
+            {safeMetrics.map((metric, index) => (
               <Chip
                 key={metric}
                 label={formatMetricLabel(metric)}
@@ -372,6 +378,7 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
             stroke={theme.palette.text.secondary}
             fontSize={12}
             tickFormatter={(value) => {
+              if (value == null || typeof value !== 'number' || isNaN(value)) return '0';
               if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
               if (value >= 1000) return `${(value / 1000).toFixed(1)}K`;
               return value.toString();
@@ -389,7 +396,7 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
             />
           )}
 
-          {metrics.map((metric, index) => (
+          {safeMetrics.map((metric, index) => (
             <Line
               key={metric}
               type="monotone"
@@ -404,7 +411,7 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
           ))}
 
           {/* Reference lines for important thresholds */}
-          {metrics.includes('success_rate') && (
+          {safeMetrics.includes('success_rate') && (
             <ReferenceLine 
               y={0.8} 
               stroke={theme.palette.warning.main} 

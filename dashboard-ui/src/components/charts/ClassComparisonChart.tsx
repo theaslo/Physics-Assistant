@@ -21,9 +21,12 @@ interface ClassComparisonChartProps {
 }
 
 const ClassComparisonChart: React.FC<ClassComparisonChartProps> = ({ classes, timeRange }) => {
+  // Ensure classes is always an array
+  const safeClasses = classes || [];
+
   // Mock data for class comparison
   const mockData = React.useMemo(() => {
-    return classes.map(className => ({
+    return safeClasses.map(className => ({
       class: className,
       averageScore: 65 + Math.random() * 30,
       totalStudents: 20 + Math.floor(Math.random() * 15),
@@ -31,17 +34,17 @@ const ClassComparisonChart: React.FC<ClassComparisonChartProps> = ({ classes, ti
       completionRate: 70 + Math.random() * 25,
       engagementScore: 60 + Math.random() * 35,
     }));
-  }, [classes]);
+  }, [safeClasses]);
 
   // In a real implementation, this would fetch actual comparison data
   const { data: comparisonData, isLoading } = useQuery({
-    queryKey: ['class-comparison', classes, timeRange],
+    queryKey: ['class-comparison', safeClasses, timeRange],
     queryFn: async () => {
       // Simulate API call delay
       await new Promise(resolve => setTimeout(resolve, 1000));
       return mockData;
     },
-    enabled: classes.length > 0,
+    enabled: safeClasses.length > 0,
   });
 
   if (isLoading) {
@@ -128,7 +131,7 @@ const ClassComparisonChart: React.FC<ClassComparisonChartProps> = ({ classes, ti
       </ResponsiveContainer>
       
       <Typography variant="caption" color="textSecondary" sx={{ mt: 1, display: 'block' }}>
-        Comparing {classes.length} classes over the selected time period
+        Comparing {safeClasses.length} classes over the selected time period
       </Typography>
     </Box>
   );

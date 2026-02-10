@@ -37,14 +37,7 @@ receivers:
   - name: 'critical-alerts'
     email_configs:
       - to: 'admin@physics-assistant.local'
-        subject: '[CRITICAL] Physics Assistant Alert: {{ .GroupLabels.alertname }}'
-        body: |
-          {{ range .Alerts }}
-          Alert: {{ .Annotations.summary }}
-          Description: {{ .Annotations.description }}
-          Labels: {{ range .Labels.SortedPairs }}{{ .Name }}={{ .Value }} {{ end }}
-          Started: {{ .StartsAt.Format "2006-01-02 15:04:05" }}
-          {{ end }}
+        send_resolved: true
     webhook_configs:
       - url: 'http://slack-webhook:3000/critical'
         send_resolved: true
@@ -52,14 +45,7 @@ receivers:
   - name: 'warning-alerts'
     email_configs:
       - to: 'team@physics-assistant.local'
-        subject: '[WARNING] Physics Assistant Alert: {{ .GroupLabels.alertname }}'
-        body: |
-          {{ range .Alerts }}
-          Alert: {{ .Annotations.summary }}
-          Description: {{ .Annotations.description }}
-          Labels: {{ range .Labels.SortedPairs }}{{ .Name }}={{ .Value }} {{ end }}
-          Started: {{ .StartsAt.Format "2006-01-02 15:04:05" }}
-          {{ end }}
+        send_resolved: true
 
   - name: 'info-alerts'
     webhook_configs:

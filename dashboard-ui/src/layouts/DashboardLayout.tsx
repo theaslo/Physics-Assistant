@@ -292,8 +292,8 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         </Typography>
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          {/* Connection Status */}
-          <ConnectionStatus />
+          {/* Connection Status - Hidden: WebSocket not implemented in dashboard-api */}
+          {/* <ConnectionStatus /> */}
 
           {/* Refresh Button */}
           <Tooltip title={`Last refresh: ${lastRefresh?.toLocaleTimeString() || 'Never'}`}>

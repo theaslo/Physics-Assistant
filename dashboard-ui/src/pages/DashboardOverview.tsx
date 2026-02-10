@@ -220,9 +220,9 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = () => {
       },
       {
         title: 'Success Rate',
-        value: `${(summary.success_rate * 100).toFixed(1)}%`,
+        value: `${((summary.success_rate ?? 0) * 100).toFixed(1)}%`,
         icon: <SuccessIcon />,
-        color: summary.success_rate >= 0.8 ? 'success' : 'warning' as const,
+        color: (summary.success_rate ?? 0) >= 0.8 ? 'success' : 'warning' as const,
         trend: {
           value: 2.1,
           label: '+2.1%',
@@ -231,9 +231,9 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = () => {
       },
       {
         title: 'Avg Response Time',
-        value: `${summary.avg_response_time.toFixed(0)}ms`,
+        value: `${(summary.avg_response_time ?? 0).toFixed(0)}ms`,
         icon: <SpeedIcon />,
-        color: summary.avg_response_time <= 300 ? 'success' : 'warning' as const,
+        color: (summary.avg_response_time ?? 0) <= 300 ? 'success' : 'warning' as const,
         trend: {
           value: -5.2,
           label: '-5.2%',
@@ -305,7 +305,7 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = () => {
             value={metric.value}
             icon={metric.icon}
             color={metric.color}
-            trend={metric.trend}
+            trend={metric.trend?.value}
             loading={loading.summary}
             error={errors.summary}
           />

@@ -56,7 +56,7 @@ import { formatBytes, formatPercentage, formatNumber, formatDuration } from '../
 
 const SystemMetrics: React.FC = () => {
   const queryClient = useQueryClient();
-  const { filters, setFilters, loading, error, setLoading, setError } = useDashboardStore();
+  const { loading, errors, setLoading, setError } = useDashboardStore();
   
   // Local state
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -180,10 +180,10 @@ const SystemMetrics: React.FC = () => {
   }
 
   // Render error state
-  if (healthError || cacheError || error) {
+  if (healthError || cacheError || errors.systemMetrics) {
     return (
       <Alert severity="error" sx={{ m: 2 }}>
-        Error loading system data: {healthError?.message || cacheError?.message || error}
+        Error loading system data: {healthError?.message || cacheError?.message || errors.systemMetrics}
       </Alert>
     );
   }
@@ -444,9 +444,10 @@ const SystemMetrics: React.FC = () => {
                 { name: 'Disk', value: mockSystemMetrics.disk_usage, color: '#4caf50' },
                 { name: 'Network', value: mockSystemMetrics.network_latency * 2, color: '#f44336' },
               ]}
-              xKey="name"
-              yKey="value"
-              showLabels={true}
+              categoryKey="name"
+              dataKey="value"
+              title="Resource Usage"
+              height={220}
             />
           </Paper>
         </Grid>
@@ -460,12 +461,15 @@ const SystemMetrics: React.FC = () => {
               Performance Timeline (Last 24 Hours)
             </Typography>
             <TimeSeriesChart
-              data={generateMockTimeSeriesData()}
-              xKey="timestamp"
-              yKey="value"
+              data={generateMockTimeSeriesData().map(d => ({
+                timestamp: d.timestamp,
+                interaction_count: Math.round(d.cpu),
+                success_rate: d.memory / 100,
+                avg_response_time: d.network * 10,
+              }))}
+              metrics={['interaction_count', 'success_rate', 'avg_response_time']}
               title="System Performance Metrics"
-              color="#1976d2"
-              showMultipleLines={true}
+              height={320}
             />
           </Paper>
         </Grid>

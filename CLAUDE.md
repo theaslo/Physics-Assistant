@@ -52,6 +52,29 @@ Physics-Assistant/
 
 The system uses Python with UV package management and supports both local development and containerized deployment through Docker Compose.
 
+## Future Enhancements (TODO)
+
+### WebSocket Real-Time Updates for Dashboard
+The React dashboard (`dashboard-ui`) has a WebSocket client ready for real-time updates, but the backend (`dashboard-api`) doesn't have a WebSocket endpoint yet.
+
+**Client implementation exists at:**
+- `dashboard-ui/src/services/websocket-client.ts`
+- `dashboard-ui/src/hooks/useWebSocket.ts`
+
+**Message types supported:**
+- `metrics_update` - Live dashboard metrics
+- `alert` - Real-time alerts
+- `student_progress` - Student progress updates
+- `heartbeat` - Connection keep-alive
+
+**To implement:**
+1. Add WebSocket endpoint to `database/dashboard_api_server.py`
+2. Use FastAPI's WebSocket support
+3. Broadcast metrics/alerts to connected clients
+4. Enable the connection status indicator in `dashboard-ui/src/components/navigation/DashboardSidebar.tsx`
+
+**Current workaround:** Dashboard uses REST API polling. Connection status indicator is hidden.
+
 ## Important Instructions
 
 Do what has been asked; nothing more, nothing less.

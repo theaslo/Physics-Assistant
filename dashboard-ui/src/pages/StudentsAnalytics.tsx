@@ -59,7 +59,22 @@ import { exportStudentData } from '../utils/export-helpers';
 
 const StudentsAnalytics: React.FC = () => {
   const queryClient = useQueryClient();
-  const { filters, setFilters, loading, error, setLoading, setError } = useDashboardStore();
+  const {
+    loading,
+    errors,
+    setLoading,
+    setError,
+    setTimeRange,
+    setSelectedAgents,
+    ui: { selectedTimeRange, selectedAgents, selectedStudents }
+  } = useDashboardStore();
+
+  // Build filters from UI state
+  const filters = React.useMemo(() => ({
+    timeRange: { preset: selectedTimeRange },
+    selectedUsers: selectedStudents,
+    selectedAgents: selectedAgents,
+  }), [selectedTimeRange, selectedStudents, selectedAgents]);
   
   // Local state
   const [selectedStudent, setSelectedStudent] = useState<string>('');
@@ -123,10 +138,9 @@ const StudentsAnalytics: React.FC = () => {
   };
 
   const handleTimeRangeChange = (newTimeRange: Partial<TimeRangeRequest>) => {
-    setFilters({
-      ...filters,
-      timeRange: { ...filters.timeRange, ...newTimeRange }
-    });
+    if (newTimeRange.preset) {
+      setTimeRange(newTimeRange.preset as any);
+    }
   };
 
   const handleStudentChange = (newStudent: string) => {
@@ -146,10 +160,10 @@ const StudentsAnalytics: React.FC = () => {
   }
 
   // Render error state
-  if (insightsError || error) {
+  if (insightsError || errors.studentInsights) {
     return (
       <Alert severity="error" sx={{ m: 2 }}>
-        Error loading student data: {insightsError?.message || error}
+        Error loading student data: {insightsError?.message || errors.studentInsights}
       </Alert>
     );
   }
@@ -229,10 +243,7 @@ const StudentsAnalytics: React.FC = () => {
                     key={agent}
                     label={agent}
                     onDelete={() => {
-                      setFilters({
-                        ...filters,
-                        selectedAgents: filters.selectedAgents.filter(a => a !== agent)
-                      });
+                      setSelectedAgents(filters.selectedAgents.filter(a => a !== agent));
                     }}
                     color="primary"
                     variant="outlined"
@@ -297,13 +308,24 @@ const StudentsAnalytics: React.FC = () => {
               <Typography variant="h6" gutterBottom>
                 Learning Progress Timeline
               </Typography>
-              <TimeSeriesChart
-                data={mockStudentProgress?.time_series || []}
-                xKey="date"
-                yKey="score"
-                title="Progress Over Time"
-                color="#1976d2"
-              />
+              {/* Progress chart - using mock time series data */}
+              {mockStudentProgress?.time_series && mockStudentProgress.time_series.length > 0 ? (
+                <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+                  <Typography variant="body2" color="text.secondary" align="center">
+                    Progress data from {mockStudentProgress.time_series[0]?.date} to {mockStudentProgress.time_series[mockStudentProgress.time_series.length - 1]?.date}
+                  </Typography>
+                  <Typography variant="h4" color="primary" sx={{ mt: 2 }}>
+                    {Math.round((mockStudentProgress.time_series[mockStudentProgress.time_series.length - 1]?.score || 0) * 100)}%
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Current Progress Score
+                  </Typography>
+                </Box>
+              ) : (
+                <Typography color="text.secondary" align="center">
+                  No progress timeline data available
+                </Typography>
+              )}
             </Paper>
           </Grid>
           
@@ -313,13 +335,13 @@ const StudentsAnalytics: React.FC = () => {
                 Concept Mastery Distribution
               </Typography>
               <BarChart
-                data={conceptData.map((concept) => ({
-                  name: concept.concept,
-                  value: concept.mastery_score * 100,
+                data={conceptData.map((concept: any) => ({
+                  name: concept.concept || concept.name,
+                  value: (concept.mastery || concept.mastery_score || 0) * 100,
                 }))}
-                xKey="name"
-                yKey="value"
-                color="#4caf50"
+                categoryKey="name"
+                dataKey="value"
+                colorMode="physics"
               />
             </Paper>
           </Grid>

@@ -151,13 +151,17 @@ const BarChart: React.FC<BarChartProps> = ({
   // ============================================================================
 
   const chartData = useMemo(() => {
+    if (!data || !Array.isArray(data)) {
+      return [];
+    }
+
     let processedData = [...data];
-    
+
     // Limit number of bars if specified
     if (maxBars && processedData.length > maxBars) {
       processedData = processedData.slice(0, maxBars);
     }
-    
+
     return processedData;
   }, [data, maxBars]);
 

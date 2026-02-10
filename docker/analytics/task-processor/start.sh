@@ -21,10 +21,10 @@ echo "Database API is ready!"
 
 # Start Celery worker
 echo "Starting Celery worker for background tasks..."
-cd /app/analytics
-exec celery -A tasks worker \
+cd /app
+exec celery -A analytics.tasks worker \
     --loglevel=info \
-    --concurrency=4 \
+    --concurrency=2 \
     --max-tasks-per-child=1000 \
     --time-limit=3600 \
     --soft-time-limit=3300 \

@@ -40,11 +40,13 @@ scrape_configs:
     scrape_interval: 15s
 
   # Physics Agents API monitoring
-  - job_name: 'physics-agents-api'
-    static_configs:
-      - targets: ['physics-agents-api:8000']
-    metrics_path: '/metrics'
-    scrape_interval: 15s
+  # NOTE: Disabled - physics-agents-api doesn't expose /metrics endpoint yet
+  # To enable, add prometheus_client to the agents API
+  # - job_name: 'physics-agents-api'
+  #   static_configs:
+  #     - targets: ['physics-agents-api:8000']
+  #   metrics_path: '/metrics'
+  #   scrape_interval: 15s
 
   # PostgreSQL monitoring
   - job_name: 'postgresql'

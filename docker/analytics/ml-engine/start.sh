@@ -24,13 +24,20 @@ echo "Initializing ML models..."
 cd /app/analytics
 python -c "
 import os
-from learning_analytics import LearningAnalytics
-from predictive_analytics import PredictiveAnalytics
+print('Checking analytics modules...')
+try:
+    from learning_analytics import LearningAnalyticsEngine
+    print('  - LearningAnalyticsEngine loaded')
+except ImportError as e:
+    print(f'  - LearningAnalyticsEngine not available: {e}')
 
-print('Initializing analytics engines...')
-learning_analytics = LearningAnalytics()
-predictive_analytics = PredictiveAnalytics()
-print('Analytics engines initialized successfully!')
+try:
+    from predictive_analytics import Phase63PredictiveAnalyticsEngine
+    print('  - Phase63PredictiveAnalyticsEngine loaded')
+except ImportError as e:
+    print(f'  - Phase63PredictiveAnalyticsEngine not available: {e}')
+
+print('Analytics modules check complete!')
 "
 
 # Start the ML analytics service

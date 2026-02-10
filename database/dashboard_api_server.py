@@ -561,21 +561,45 @@ async def get_dashboard_summary(
             summary_result = await conn.fetchrow(base_query, *params)
             
             # Get agent breakdown
-            agent_query = base_query.replace("COUNT(*)", "agent_type, COUNT(*)") + " GROUP BY agent_type ORDER BY COUNT(*) DESC"
-            agent_results = await conn.fetch(agent_query, *params)
-            
-            # Get hourly activity (last 24 hours)
-            activity_query = """
-            SELECT 
-                date_trunc('hour', created_at) as hour,
+            agent_query = """
+            SELECT agent_type, COUNT(*) as count
+            FROM interactions
+            WHERE created_at BETWEEN $1 AND $2
+            """
+            agent_params = [start_date, end_date]
+
+            if filters.user_ids:
+                agent_query += f" AND user_id = ANY(${len(agent_params) + 1})"
+                agent_params.append(filters.user_ids)
+
+            if filters.agent_types:
+                agent_query += f" AND agent_type = ANY(${len(agent_params) + 1})"
+                agent_params.append(filters.agent_types)
+
+            agent_query += " GROUP BY agent_type ORDER BY count DESC"
+            agent_results = await conn.fetch(agent_query, *agent_params)
+
+            # Get activity within the selected time range
+            # Choose appropriate time bucket based on range
+            range_hours = (end_date - start_date).total_seconds() / 3600
+            if range_hours <= 24:
+                time_bucket = 'hour'
+            elif range_hours <= 168:  # 1 week
+                time_bucket = 'day'
+            else:
+                time_bucket = 'week'
+
+            activity_query = f"""
+            SELECT
+                date_trunc('{time_bucket}', created_at) as hour,
                 COUNT(*) as interactions,
                 AVG(execution_time_ms) as avg_response_time
-            FROM interactions 
-            WHERE created_at >= NOW() - INTERVAL '24 hours'
-            GROUP BY hour 
-            ORDER BY hour
+            FROM interactions
+            WHERE created_at BETWEEN $1 AND $2
+            GROUP BY 1
+            ORDER BY 1
             """
-            activity_results = await conn.fetch(activity_query)
+            activity_results = await conn.fetch(activity_query, start_date, end_date)
         
         # Build response data
         response_data = {
@@ -697,33 +721,43 @@ async def generate_time_series(
     # Map granularity to PostgreSQL interval
     interval_map = {
         "5m": "5 minutes",
-        "15m": "15 minutes", 
+        "15m": "15 minutes",
         "1h": "1 hour",
         "6h": "6 hours",
         "1d": "1 day",
         "1w": "1 week"
     }
-    
+
+    # Map granularity to date_trunc precision
+    trunc_map = {
+        "15m": "hour",
+        "1h": "hour",
+        "6h": "hour",
+        "1d": "day",
+        "1w": "week"
+    }
+
     interval = interval_map.get(granularity, "1 hour")
-    
+    trunc_precision = trunc_map.get(granularity, "hour")
+
     async with db.postgres.get_connection() as conn:
         # Build time series query
         query = f"""
         WITH time_buckets AS (
             SELECT generate_series(
-                date_trunc('{granularity.replace('m', 'min').replace('h', 'hour').replace('d', 'day').replace('w', 'week')}', $1),
-                date_trunc('{granularity.replace('m', 'min').replace('h', 'hour').replace('d', 'day').replace('w', 'week')}', $2),
+                date_trunc('{trunc_precision}', $1::timestamptz),
+                date_trunc('{trunc_precision}', $2::timestamptz),
                 interval '{interval}'
             ) as bucket
         )
-        SELECT 
+        SELECT
             tb.bucket,
             COALESCE(COUNT(i.id), 0) as interaction_count,
             COALESCE(AVG(i.execution_time_ms), 0) as avg_response_time,
             COALESCE(AVG(CASE WHEN i.success THEN 1.0 ELSE 0.0 END), 0) as success_rate,
             COALESCE(COUNT(DISTINCT i.user_id), 0) as unique_users
         FROM time_buckets tb
-        LEFT JOIN interactions i ON date_trunc('{granularity.replace('m', 'min').replace('h', 'hour').replace('d', 'day').replace('w', 'week')}', i.created_at) = tb.bucket
+        LEFT JOIN interactions i ON date_trunc('{trunc_precision}', i.created_at) = tb.bucket
             AND i.created_at BETWEEN $1 AND $2
         """
         
@@ -2168,7 +2202,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "dashboard_api_server:app",
         host="0.0.0.0",
-        port=8001,
+        port=8002,
         log_level="info",
         reload=True
     )

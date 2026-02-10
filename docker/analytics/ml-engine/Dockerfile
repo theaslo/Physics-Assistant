@@ -46,7 +46,10 @@ RUN pip install --no-cache-dir \
     xgboost==2.0.2 \
     lightgbm==4.1.0 \
     optuna==3.4.0 \
-    mlflow==2.8.1
+    mlflow==2.8.1 \
+    fastapi==0.109.0 \
+    uvicorn==0.27.0 \
+    pydantic==2.5.3
 
 # Copy application code
 COPY database/analytics/ ./analytics/

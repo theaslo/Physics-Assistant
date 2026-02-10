@@ -13,8 +13,10 @@ interface LearningPathFlowProps {
 }
 
 const LearningPathFlow: React.FC<LearningPathFlowProps> = ({ concepts, studentId }) => {
-  // Sort concepts by mastery score to show learning progression
-  const sortedConcepts = [...concepts].sort((a, b) => b.mastery_score - a.mastery_score);
+  // Sort concepts by mastery score to show learning progression (handle both field names)
+  const sortedConcepts = [...concepts].sort((a: any, b: any) =>
+    (b.mastery_score ?? b.mastery ?? 0) - (a.mastery_score ?? a.mastery ?? 0)
+  );
 
   const getStatusIcon = (masteryScore: number) => {
     if (masteryScore >= 0.8) {
@@ -45,59 +47,63 @@ const LearningPathFlow: React.FC<LearningPathFlowProps> = ({ concepts, studentId
       </Typography>
       
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-        {sortedConcepts.map((concept, index) => (
-          <Paper
-            key={concept.concept}
-            elevation={1}
-            sx={{
-              p: 2,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 2,
-              border: concept.mastery_score >= 0.8 ? '2px solid #4caf50' : '1px solid #e0e0e0',
-            }}
-          >
-            {getStatusIcon(concept.mastery_score)}
-            
-            <Box sx={{ flex: 1 }}>
-              <Typography variant="subtitle2">
-                {concept.concept.replace(/_/g, ' ').toUpperCase()}
-              </Typography>
-              <Typography variant="body2" color="textSecondary">
-                Mastery: {Math.round(concept.mastery_score * 100)}%
-              </Typography>
-            </Box>
-            
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Chip
-                label={getStatusText(concept.mastery_score)}
-                size="small"
-                color={getStatusColor(concept.mastery_score) as any}
-                variant="outlined"
-              />
-              
-              <Box
-                sx={{
-                  width: 60,
-                  height: 6,
-                  backgroundColor: '#e0e0e0',
-                  borderRadius: 3,
-                  overflow: 'hidden',
-                }}
-              >
+        {sortedConcepts.map((concept: any, index) => {
+          const score = concept.mastery_score ?? concept.mastery ?? 0;
+          const name = concept.concept || concept.name || 'Unknown';
+          return (
+            <Paper
+              key={name}
+              elevation={1}
+              sx={{
+                p: 2,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 2,
+                border: score >= 0.8 ? '2px solid #4caf50' : '1px solid #e0e0e0',
+              }}
+            >
+              {getStatusIcon(score)}
+
+              <Box sx={{ flex: 1 }}>
+                <Typography variant="subtitle2">
+                  {name.replace(/_/g, ' ').toUpperCase()}
+                </Typography>
+                <Typography variant="body2" color="textSecondary">
+                  Mastery: {Math.round(score * 100)}%
+                </Typography>
+              </Box>
+
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Chip
+                  label={getStatusText(score)}
+                  size="small"
+                  color={getStatusColor(score) as any}
+                  variant="outlined"
+                />
+
                 <Box
                   sx={{
-                    width: `${concept.mastery_score * 100}%`,
-                    height: '100%',
-                    backgroundColor: concept.mastery_score >= 0.8 ? '#4caf50' : 
-                                   concept.mastery_score >= 0.6 ? '#ff9800' : '#f44336',
-                    transition: 'width 0.3s ease',
+                    width: 60,
+                    height: 6,
+                    backgroundColor: '#e0e0e0',
+                    borderRadius: 3,
+                    overflow: 'hidden',
                   }}
-                />
+                >
+                  <Box
+                    sx={{
+                      width: `${score * 100}%`,
+                      height: '100%',
+                      backgroundColor: score >= 0.8 ? '#4caf50' :
+                                     score >= 0.6 ? '#ff9800' : '#f44336',
+                      transition: 'width 0.3s ease',
+                    }}
+                  />
+                </Box>
               </Box>
-            </Box>
-          </Paper>
-        ))}
+            </Paper>
+          );
+        })}
         
         {sortedConcepts.length === 0 && (
           <Typography variant="body2" color="textSecondary" sx={{ textAlign: 'center', py: 4 }}>
