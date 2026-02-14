@@ -401,29 +401,29 @@ services:
     restart: unless-stopped
 
   # Layer 4 - Frontends
-  streamlit-ui:
-    build:
-      context: .
-      dockerfile: docker/frontend/streamlit-ui/Dockerfile
-    container_name: physics-streamlit-ui
-    ports:
-      - "8501:8501"
-    environment:
-      PHYSICS_API_HOST: physics-agents-api
-      PHYSICS_API_PORT: 8000
-      DATABASE_API_HOST: database-api
-      DATABASE_API_PORT: 8001
-      MCP_SERVER_URL: http://physics-agents-api:8000
-      DATABASE_API_URL: http://database-api:8001
-    volumes:
-      - ./UI/logs:/app/logs
-      - ./UI/uploads:/app/uploads
-      - ./UI/temp:/app/temp
-    networks:
-      - physics-network
-    depends_on:
-      - physics-agents-api
-    restart: unless-stopped
+  # streamlit-ui:
+  #   build:
+  #     context: .
+  #     dockerfile: docker/frontend/streamlit-ui/Dockerfile
+  #   container_name: physics-streamlit-ui
+  #   ports:
+  #     - "8501:8501"
+  #   environment:
+  #     PHYSICS_API_HOST: physics-agents-api
+  #     PHYSICS_API_PORT: 8000
+  #     DATABASE_API_HOST: database-api
+  #     DATABASE_API_PORT: 8001
+  #     MCP_SERVER_URL: http://physics-agents-api:8000
+  #     DATABASE_API_URL: http://database-api:8001
+  #   volumes:
+  #     - ./UI/logs:/app/logs
+  #     - ./UI/uploads:/app/uploads
+  #     - ./UI/temp:/app/temp
+  #   networks:
+  #     - physics-network
+  #   depends_on:
+  #     - physics-agents-api
+  #   restart: unless-stopped
 
   react-dashboard:
     build:
@@ -444,7 +444,7 @@ services:
       dockerfile: docker/frontend/student-react-ui/Dockerfile
     container_name: physics-student-react-ui
     ports:
-      - "3001:80"
+      - "8501:80"
     networks:
       - physics-network
     depends_on:
@@ -462,7 +462,7 @@ services:
     networks:
       - physics-network
     depends_on:
-      - streamlit-ui
+      - student-react-ui
       - react-dashboard
     restart: unless-stopped
 
@@ -576,14 +576,14 @@ services:
 
   # node-exporter: Disabled on macOS - Linux-only service
   # Uncomment below for Linux deployments:
-  # node-exporter:
-  #   image: prom/node-exporter:latest
-  #   container_name: physics-node-exporter
-  #   command:
-  #     - '--path.rootfs=/host'
-  #   pid: host
-  #   volumes:
-  #     - '/:/host:ro,rslave'
-  #   networks:
-  #     - physics-network
-  #   restart: unless-stopped
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: physics-node-exporter
+    command:
+      - '--path.rootfs=/host'
+    pid: host
+    volumes:
+      - '/:/host:ro,rslave'
+    networks:
+      - physics-network
+    restart: unless-stopped
