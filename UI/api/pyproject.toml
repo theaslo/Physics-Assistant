@@ -12,7 +12,7 @@ dependencies = [
     "langgraph>=0.4.8",
     # Strands SDK for Physics 102-201-202 agents
     "strands-agents>=0.1.0",
-    "mcp>=1.1.0",
+    "mcp>=1.13.0,<2.0.0",
     # FastAPI
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",

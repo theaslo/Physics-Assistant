@@ -451,20 +451,21 @@ services:
       - physics-agents-api
     restart: unless-stopped
 
-  nginx-gateway:
-    build:
-      context: .
-      dockerfile: docker/frontend/nginx-gateway/Dockerfile
-    container_name: physics-nginx-gateway
-    ports:
-      - "8080:80"
-      - "8443:443"
-    networks:
-      - physics-network
-    depends_on:
-      - student-react-ui
-      - react-dashboard
-    restart: unless-stopped
+  # nginx-gateway: Disabled for local development - services accessed directly
+  # nginx-gateway:
+  #   build:
+  #     context: .
+  #     dockerfile: docker/frontend/nginx-gateway/Dockerfile
+  #   container_name: physics-nginx-gateway
+  #   ports:
+  #     - "8080:80"
+  #     - "8443:443"
+  #   networks:
+  #     - physics-network
+  #   depends_on:
+  #     - student-react-ui
+  #     - react-dashboard
+  #   restart: unless-stopped
 
   # Layer 5 - Analytics Services
   ml-engine:
@@ -576,14 +577,14 @@ services:
 
   # node-exporter: Disabled on macOS - Linux-only service
   # Uncomment below for Linux deployments:
-  node-exporter:
-    image: prom/node-exporter:latest
-    container_name: physics-node-exporter
-    command:
-      - '--path.rootfs=/host'
-    pid: host
-    volumes:
-      - '/:/host:ro,rslave'
-    networks:
-      - physics-network
-    restart: unless-stopped
+  # node-exporter:
+  #   image: prom/node-exporter:latest
+  #   container_name: physics-node-exporter
+  #   command:
+  #     - '--path.rootfs=/host'
+  #   pid: host
+  #   volumes:
+  #     - '/:/host:ro,rslave'
+  #   networks:
+  #     - physics-network
+  #   restart: unless-stopped

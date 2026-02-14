@@ -42,4 +42,5 @@ print('Analytics modules check complete!')
 
 # Start the ML analytics service
 echo "Starting ML Analytics Engine on port 8003..."
+cd /app
 exec python -m uvicorn analytics.api:app --host 0.0.0.0 --port 8003 --workers 2

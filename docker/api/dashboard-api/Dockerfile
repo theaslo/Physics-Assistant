@@ -47,7 +47,7 @@ RUN chown physicsapp:physicsapp /app/start.sh
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD curl -f http://localhost:8002/health || exit 1
+    CMD curl -f http://localhost:8002/dashboard/health || exit 1
 
 # Switch to application user
 USER physicsapp

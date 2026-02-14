@@ -38,7 +38,7 @@ from api_server import analytics_engine, mastery_detector, path_optimizer, data_
 
 # Import advanced analytics engines
 try:
-    from analytics.predictive_analytics import PredictiveAnalyticsEngine
+    from analytics.predictive_analytics import Phase63PredictiveAnalyticsEngine as PredictiveAnalyticsEngine
     from analytics.comparative_analytics import ComparativeAnalyticsEngine
     from analytics.content_effectiveness import ContentEffectivenessEngine
     from analytics.statistical_analysis import StatisticalAnalysisEngine
@@ -445,28 +445,31 @@ async def startup_event():
         redis_client = None
     
     # Initialize advanced analytics engines
-    try:
-        db_manager = await get_db()
-        
-        predictive_engine = PredictiveAnalyticsEngine(db_manager)
-        await predictive_engine.initialize()
-        
-        comparative_engine = ComparativeAnalyticsEngine(db_manager)
-        await comparative_engine.initialize()
-        
-        content_engine = ContentEffectivenessEngine(db_manager)
-        await content_engine.initialize()
-        
-        statistical_engine = StatisticalAnalysisEngine(db_manager)
-        await statistical_engine.initialize()
-        
-        insights_engine = AutomatedInsightsEngine(db_manager)
-        await insights_engine.initialize()
-        
-        logger.info("✅ Advanced analytics engines initialized")
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to initialize advanced analytics engines: {e}")
+    if ADVANCED_ANALYTICS_AVAILABLE:
+        try:
+            db_manager = await get_db()
+
+            predictive_engine = PredictiveAnalyticsEngine(db_manager)
+            await predictive_engine.initialize()
+
+            comparative_engine = ComparativeAnalyticsEngine(db_manager)
+            await comparative_engine.initialize()
+
+            content_engine = ContentEffectivenessEngine(db_manager)
+            await content_engine.initialize()
+
+            statistical_engine = StatisticalAnalysisEngine(db_manager)
+            await statistical_engine.initialize()
+
+            insights_engine = AutomatedInsightsEngine(db_manager)
+            await insights_engine.initialize()
+
+            logger.info("✅ Advanced analytics engines initialized")
+
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize advanced analytics engines: {e}")
+    else:
+        logger.warning("⚠️ Advanced analytics engines skipped - modules not available")
     
     # Start background processing
     if not background_processor_running:
