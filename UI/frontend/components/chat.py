@@ -53,22 +53,27 @@ class ChatInterface:
     def _show_welcome_message(self):
         """Show welcome message for new chat session"""
         agent_name = self.agent_info.get('name', 'Physics Agent')
-        
+
         with st.chat_message("assistant", avatar=self.agent_info.get('icon', '🤖')):
             st.markdown(f"""
             Hello! I'm the **{agent_name}**. I'm here to help you with physics problems and concepts.
-            
+
             **I can help you with:**
             {self._get_agent_help_topics()}
-            
-            **Example Questions You Can Ask:**
-            {self._get_example_questions()}
-            
+            """)
+
+            st.markdown("**Example Questions You Can Ask:**")
+            examples = self._get_example_questions_list()
+            for example in examples:
+                if st.button(example, key=f"example_{self.agent_id}_{example[:20]}", use_container_width=True):
+                    self._handle_user_input(example)
+
+            st.markdown("""
             **How to get started:**
             - Ask me a specific physics question
-            - Upload an image of a physics problem  
+            - Upload an image of a physics problem
             - Request help with a particular concept
-            
+
             What would you like to work on today?
             """)
     
@@ -144,6 +149,42 @@ class ChatInterface:
             formatted_examples.append(f"{i}. {example}")
         return "\n".join(formatted_examples)
     
+    def _get_example_questions_list(self) -> List[str]:
+        """Get example questions as a list of plain strings for clickable buttons"""
+        example_questions = {
+            "math_agent": [
+                "Solve x² + 5x + 6 = 0 using the quadratic formula",
+                "What is sin(45°) and cos(45°)?",
+                "Calculate log₁₀(100) and ln(e²)"
+            ],
+            "forces_agent": [
+                "A 5kg box on a 30° incline with friction coefficient 0.3",
+                "Add forces: 10N at 30°, 15N at 120°, 8N at 270°",
+                "Calculate spring force with k=200 N/m, compressed 0.05m"
+            ],
+            "kinematics_agent": [
+                "Car accelerates from rest at 3 m/s² for 5 seconds",
+                "Ball thrown at 30 m/s at 45° from 10m height",
+                "Object dropped from 50m - how long to fall?"
+            ],
+            "momentum_agent": [
+                "Calculate momentum of 5kg object moving at 10 m/s",
+                "2kg ball at 8 m/s collides with 3kg ball at rest",
+                "Car crash: 1500kg at 20 m/s hits 1200kg at 15 m/s"
+            ],
+            "energy_agent": [
+                "Calculate kinetic energy of 2kg object at 5 m/s",
+                "Ball lifted 10m high - what's the potential energy?",
+                "Work done pushing 100N force over 5m distance"
+            ],
+            "angular_motion_agent": [
+                "Calculate moment of inertia of 2kg rod, 1.5m long",
+                "Cylinder rolls down 30° incline, mass=5kg, radius=0.3m",
+                "Figure skater spins faster when pulling arms in"
+            ]
+        }
+        return example_questions.get(self.agent_id, ["Ask me any physics question!"])
+
     def _render_message(self, message: Dict):
         """Render a single chat message"""
         role = message.get('role', 'user')

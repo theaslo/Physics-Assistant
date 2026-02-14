@@ -495,8 +495,8 @@ services:
       dockerfile: docker/analytics/task-processor/Dockerfile
     container_name: physics-task-processor
     environment:
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://:physics_redis_2024@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:physics_redis_2024@redis:6379/0
       DATABASE_API_HOST: database-api
       DATABASE_API_PORT: 8001
       REDIS_HOST: redis
@@ -518,7 +518,7 @@ services:
       dockerfile: docker/analytics/flower-monitor/Dockerfile
     container_name: physics-flower-monitor
     environment:
-      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://:physics_redis_2024@redis:6379/0
       REDIS_HOST: redis
       REDIS_PORT: 6379
     ports:

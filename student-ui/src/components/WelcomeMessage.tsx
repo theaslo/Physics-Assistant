@@ -4,6 +4,7 @@ import { getAgentColor } from '../themes/uconn-theme'
 
 interface WelcomeMessageProps {
   agent: Agent
+  onExampleClick?: (question: string) => void
 }
 
 // Example questions per agent
@@ -49,7 +50,7 @@ const HELP_TOPICS: Record<string, string[]> = {
   angular_motion_agent: ['Rotational motion', 'Torque and angular momentum', 'Moment of inertia'],
 }
 
-export default function WelcomeMessage({ agent }: WelcomeMessageProps) {
+export default function WelcomeMessage({ agent, onExampleClick }: WelcomeMessageProps) {
   const examples = EXAMPLE_QUESTIONS[agent.agent_id] || []
   const topics = HELP_TOPICS[agent.agent_id] || []
   const agentColor = getAgentColor(agent.agent_id)
@@ -112,13 +113,20 @@ export default function WelcomeMessage({ agent }: WelcomeMessageProps) {
               label={example}
               variant="outlined"
               size="small"
+              clickable={!!onExampleClick}
+              onClick={() => onExampleClick?.(example)}
               sx={{
                 height: 'auto',
                 py: 0.5,
+                cursor: onExampleClick ? 'pointer' : 'default',
                 '& .MuiChip-label': {
                   whiteSpace: 'normal',
                   display: 'block',
                 },
+                '&:hover': onExampleClick ? {
+                  bgcolor: `${agentColor}20`,
+                  borderColor: agentColor,
+                } : {},
               }}
             />
           ))}

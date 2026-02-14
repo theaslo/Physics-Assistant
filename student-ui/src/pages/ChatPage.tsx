@@ -272,7 +272,7 @@ export default function ChatPage() {
             <>
               {/* Welcome message if no messages yet */}
               {messages.length === 0 && selectedAgentInfo && (
-                <WelcomeMessage agent={selectedAgentInfo} />
+                <WelcomeMessage agent={selectedAgentInfo} onExampleClick={handleSendMessage} />
               )}
 
               {/* Chat messages */}
