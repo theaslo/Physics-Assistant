@@ -236,16 +236,22 @@ def create_tool_wrapper(db_logger: DatabaseLogger, tool_name: str):
                         parameters['_positional_args'] = list(args)
 
                 # Log to database (non-blocking)
-                asyncio.create_task(
-                    db_logger.log_tool_usage(
-                        tool_name=tool_name,
-                        parameters=parameters,
-                        response=response,
-                        execution_time=execution_time,
-                        success=success,
-                        error_message=error_message
-                    )
-                )
+                try:
+                    loop = asyncio.get_running_loop()
+                    if loop.is_running():
+                        asyncio.create_task(
+                            db_logger.log_tool_usage(
+                                tool_name=tool_name,
+                                parameters=parameters,
+                                response=response,
+                                execution_time=execution_time,
+                                success=success,
+                                error_message=error_message
+                            )
+                        )
+                except RuntimeError:
+                    # Event loop not running or closed - skip logging
+                    pass
 
         # Preserve function signature for langchain-mcp-adapters compatibility
         wrapped_tool.__signature__ = inspect.signature(original_tool)
