@@ -26,7 +26,7 @@ RUN mkdir -p /prometheus/data /etc/prometheus/rules && \
 
 # Copy startup script
 COPY docker/monitoring/prometheus/start.sh /start.sh
-RUN chmod +x /start.sh
+RUN chmod +x /start.sh && chown physicsapp:physicsapp /start.sh
 
 # Health check
 # CMD curl -f http://localhost:9090/-/healthy || exit 1

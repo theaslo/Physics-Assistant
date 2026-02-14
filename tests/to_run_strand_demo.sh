@@ -1,1 +1,0 @@
-docker exec -it physics-agents-api uv run python /app/strands_demo.py

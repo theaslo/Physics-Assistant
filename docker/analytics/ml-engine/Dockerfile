@@ -60,7 +60,7 @@ RUN mkdir -p /app/models /app/logs /app/exports /app/temp && \
 
 # Copy startup script
 COPY docker/analytics/ml-engine/start.sh /app/start.sh
-RUN chmod +x /app/start.sh
+RUN chmod +x /app/start.sh && chown physicsapp:physicsapp /app/start.sh
 
 # Health check
     CMD python -c "import requests; requests.get('http://localhost:8003/health')" || exit 1

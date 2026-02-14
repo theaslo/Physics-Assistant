@@ -53,7 +53,7 @@ RUN mkdir -p /app/logs /app/temp /app/results && \
 
 # Copy startup script
 COPY docker/analytics/task-processor/start.sh /app/start.sh
-RUN chmod +x /app/start.sh
+RUN chmod +x /app/start.sh && chown physicsapp:physicsapp /app/start.sh
 
 # Health check
     CMD celery -A analytics.tasks status || exit 1
