@@ -5,6 +5,7 @@ import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
 import { Message } from '../stores/chat-store'
 import { getAgentColor, getAgentIcon } from '../themes/uconn-theme'
+import PhysicsGraphPanel from './PhysicsGraphPanel'
 
 interface ChatMessageProps {
   message: Message
@@ -98,6 +99,10 @@ export default function ChatMessage({ message }: ChatMessageProps) {
               {message.content}
             </ReactMarkdown>
           </Box>
+
+          {!isUser && message.graphs && message.graphs.length > 0 && (
+            <PhysicsGraphPanel graphs={message.graphs} />
+          )}
 
           {/* Tools used indicator */}
           {message.toolsUsed && message.toolsUsed.length > 0 && (

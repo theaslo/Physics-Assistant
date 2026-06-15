@@ -112,6 +112,9 @@ export default function ChatPage() {
             agentId: selectedAgent,
             toolsUsed: response.tools_used,
             reasoning: response.reasoning,
+            graphs: response.metadata?.graphs,
+            graphWarnings: response.metadata?.graph_warnings,
+            graphErrors: response.metadata?.graph_errors,
           }
           addMessage(assistantMessage)
         } else {

@@ -15,9 +15,9 @@ const EXAMPLE_QUESTIONS: Record<string, string[]> = {
     'Calculate spring force with k=200 N/m, compressed 0.05m',
   ],
   kinematics_agent: [
-    'Car accelerates from rest at 3 m/s² for 5 seconds',
-    'Ball thrown at 30 m/s at 45° from 10m height',
-    'Object dropped from 50m - how long to fall?',
+    'Graph a car that accelerates from rest at 3 m/s² for 5 seconds',
+    'Graph a runner moving at constant velocity 6 m/s for 8 s',
+    'A train slows from 20 m/s to rest in 10 s. Make the motion graphs.',
   ],
   math_agent: [
     'Solve x² + 5x + 6 = 0 using the quadratic formula',

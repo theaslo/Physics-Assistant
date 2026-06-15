@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from 'axios'
+import type { PhysicsGraphPayload } from '../types/graphs'
 
 // Types
 export interface AgentInfo {
@@ -27,8 +28,15 @@ export interface SolveResponse {
   reasoning?: string
   tools_used?: string[]
   execution_time_ms?: number
-  metadata?: Record<string, unknown>
+  metadata?: SolveMetadata
   error?: string
+}
+
+export interface SolveMetadata extends Record<string, unknown> {
+  graphs?: PhysicsGraphPayload[]
+  graph_warnings?: string[]
+  graph_errors?: string[]
+  graph_inputs?: Record<string, unknown>
 }
 
 export interface HealthResponse {

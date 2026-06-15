@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import type { PhysicsGraphPayload } from '../types/graphs'
 
 export interface Message {
   id: string
@@ -9,6 +10,9 @@ export interface Message {
   agentId: string
   toolsUsed?: string[]
   reasoning?: string
+  graphs?: PhysicsGraphPayload[]
+  graphWarnings?: string[]
+  graphErrors?: string[]
 }
 
 export interface Agent {

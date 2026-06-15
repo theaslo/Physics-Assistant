@@ -11,6 +11,12 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from physics_graphs import (
+    build_kinematics_graph_response,
+    build_kinematics_graphs_from_context,
+    should_attempt_kinematics_graph,
+)
+
 # Import all Strands-based agents
 from strands_agents import (
     # Physics 101
@@ -101,6 +107,25 @@ class ProblemSolveResponse(BaseModel):
     execution_time_ms: Optional[int] = None
     metadata: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+
+class KinematicsGraphRequest(BaseModel):
+    """Request model for generating 1D kinematics graphs without invoking an agent"""
+    problem: Optional[str] = Field(
+        default="",
+        description="Natural-language kinematics problem or graph request"
+    )
+    inputs: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Structured kinematics values such as x0, v0, a, t, x, v, or time_range"
+    )
+
+class KinematicsGraphResponse(BaseModel):
+    """Response model for reusable graph payloads"""
+    success: bool
+    graphs: list
+    warnings: list
+    errors: list
+    parsed_inputs: Dict[str, Any]
 
 class AgentHealthResponse(BaseModel):
     """Response model for agent health check"""
@@ -277,6 +302,23 @@ async def solve_problem(
             user_id=request.user_id,
             session_id=request.session_id
         )
+
+        if agent_id == "kinematics_agent":
+            graph_result = build_kinematics_graphs_from_context(request.problem, request.context)
+            metadata = dict(result.get("metadata") or {})
+            metadata["graphs"] = graph_result["graphs"]
+            metadata["graph_warnings"] = graph_result["warnings"]
+            metadata["graph_errors"] = graph_result["errors"]
+            metadata["graph_inputs"] = graph_result["parsed_inputs"]
+            result["metadata"] = metadata
+
+            if (
+                not graph_result["graphs"]
+                and graph_result["errors"]
+                and should_attempt_kinematics_graph(request.problem, request.context)
+                and result.get("solution")
+            ):
+                result["solution"] += "\n\nGraph note: " + " ".join(graph_result["errors"])
         
         return ProblemSolveResponse(**result)
         
@@ -290,6 +332,24 @@ async def solve_problem(
             problem=request.problem,
             error=str(e)
         )
+
+@app.post("/kinematics/graphs", response_model=KinematicsGraphResponse)
+async def create_kinematics_graphs(request: KinematicsGraphRequest) -> KinematicsGraphResponse:
+    """
+    Generate reusable 1D kinematics graph payloads from a student question or structured inputs.
+    """
+    graph_result = build_kinematics_graph_response(
+        problem=request.problem or "",
+        structured=request.inputs,
+    )
+
+    return KinematicsGraphResponse(
+        success=len(graph_result["errors"]) == 0 and len(graph_result["graphs"]) > 0,
+        graphs=graph_result["graphs"],
+        warnings=graph_result["warnings"],
+        errors=graph_result["errors"],
+        parsed_inputs=graph_result["parsed_inputs"],
+    )
 
 @app.get("/agent/{agent_id}/health", response_model=AgentHealthResponse)
 async def check_agent_health(
