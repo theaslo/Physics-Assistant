@@ -16,8 +16,8 @@ const EXAMPLE_QUESTIONS: Record<string, string[]> = {
   ],
   kinematics_agent: [
     'Graph a car that accelerates from rest at 3 m/s² for 5 seconds',
-    'Graph a runner moving at constant velocity 6 m/s for 8 s',
-    'A train slows from 20 m/s to rest in 10 s. Make the motion graphs.',
+    'Graph the trajectory of a ball launched at 30 m/s at 45 degrees',
+    'A ball is thrown horizontally from a 20 m cliff at 10 m/s. Graph its path.',
   ],
   math_agent: [
     'Solve x² + 5x + 6 = 0 using the quadratic formula',

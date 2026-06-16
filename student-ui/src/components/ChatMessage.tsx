@@ -1,4 +1,4 @@
-import { Box, Paper, Typography, Chip } from '@mui/material'
+import { Alert, Box, Paper, Typography, Chip } from '@mui/material'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
@@ -102,6 +102,18 @@ export default function ChatMessage({ message }: ChatMessageProps) {
 
           {!isUser && message.graphs && message.graphs.length > 0 && (
             <PhysicsGraphPanel graphs={message.graphs} />
+          )}
+
+          {!isUser && (!message.graphs || message.graphs.length === 0) && message.graphWarnings && message.graphWarnings.length > 0 && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              {message.graphWarnings.join(' ')}
+            </Alert>
+          )}
+
+          {!isUser && message.graphErrors && message.graphErrors.length > 0 && (
+            <Alert severity="info" sx={{ mt: 2 }}>
+              {message.graphErrors.join(' ')}
+            </Alert>
           )}
 
           {/* Tools used indicator */}

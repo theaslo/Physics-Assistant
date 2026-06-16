@@ -32,7 +32,7 @@ export interface PhysicsGraphParameter {
 }
 
 export interface PhysicsGraphPayload {
-  type: 'kinematics_1d'
+  type: 'kinematics_1d' | 'projectile_motion' | 'kinematics_piecewise'
   title: string
   subtitle?: string
   motionType?: string
