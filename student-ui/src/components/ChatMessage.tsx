@@ -15,6 +15,10 @@ export default function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.role === 'user'
   const agentColor = getAgentColor(message.agentId)
   const agentIcon = getAgentIcon(message.agentId)
+  const hasGraphs = !isUser && Boolean(message.graphs?.length)
+  const hasGraphWarnings = !isUser && (!message.graphs || message.graphs.length === 0) && Boolean(message.graphWarnings?.length)
+  const hasGraphErrors = !isUser && Boolean(message.graphErrors?.length)
+  const hasGraphSection = hasGraphs || hasGraphWarnings || hasGraphErrors
 
   return (
     <Box
@@ -63,6 +67,21 @@ export default function ChatMessage({ message }: ChatMessageProps) {
             borderTopLeftRadius: isUser ? 16 : 0,
           }}
         >
+          {!isUser && (
+            <Typography
+              variant="overline"
+              sx={{
+                display: 'block',
+                mb: 0.75,
+                color: 'text.secondary',
+                fontWeight: 700,
+                letterSpacing: 0,
+              }}
+            >
+              Solution
+            </Typography>
+          )}
+
           {/* Markdown content with LaTeX math rendering */}
           <Box
             sx={{
@@ -100,20 +119,37 @@ export default function ChatMessage({ message }: ChatMessageProps) {
             </ReactMarkdown>
           </Box>
 
-          {!isUser && message.graphs && message.graphs.length > 0 && (
-            <PhysicsGraphPanel graphs={message.graphs} />
-          )}
+          {hasGraphSection && (
+            <Box sx={{ mt: 2, pt: 2, borderTop: 1, borderColor: 'divider' }}>
+              <Typography
+                variant="overline"
+                sx={{
+                  display: 'block',
+                  mb: 0.75,
+                  color: 'text.secondary',
+                  fontWeight: 700,
+                  letterSpacing: 0,
+                }}
+              >
+                Graph
+              </Typography>
 
-          {!isUser && (!message.graphs || message.graphs.length === 0) && message.graphWarnings && message.graphWarnings.length > 0 && (
-            <Alert severity="warning" sx={{ mt: 2 }}>
-              {message.graphWarnings.join(' ')}
-            </Alert>
-          )}
+              {hasGraphs && (
+                <PhysicsGraphPanel graphs={message.graphs ?? []} />
+              )}
 
-          {!isUser && message.graphErrors && message.graphErrors.length > 0 && (
-            <Alert severity="info" sx={{ mt: 2 }}>
-              {message.graphErrors.join(' ')}
-            </Alert>
+              {hasGraphWarnings && (
+                <Alert severity="warning" sx={{ mt: hasGraphs ? 2 : 0 }}>
+                  {message.graphWarnings?.join(' ')}
+                </Alert>
+              )}
+
+              {hasGraphErrors && (
+                <Alert severity="info" sx={{ mt: hasGraphs || hasGraphWarnings ? 2 : 0 }}>
+                  {message.graphErrors?.join(' ')}
+                </Alert>
+              )}
+            </Box>
           )}
 
           {/* Tools used indicator */}

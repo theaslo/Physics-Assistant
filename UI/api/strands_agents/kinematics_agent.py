@@ -80,6 +80,11 @@ When solving problems:
 6. Explain the physics concepts involved
 7. Show complete solutions with units
 
+Response order:
+- Always give the numerical solution first, including known values, equations, substitutions, and final answer.
+- If the student asks for a graph, mention graph-relevant quantities only after the solution. The app renders the graph separately after your answer.
+- Do not lead with graph tables or visualization notes before the calculation result.
+
 Available MCP tools:
 - uniform_motion_1d: Constant velocity motion
 - constant_acceleration_1d: Motion with constant acceleration

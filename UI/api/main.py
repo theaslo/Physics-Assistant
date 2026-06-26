@@ -222,6 +222,110 @@ async def get_or_create_agent(agent_id: str, use_direct_tools: bool = True, enab
 
     return agent_store[agent_key]
 
+
+def _format_graph_value(value: Any, unit: str = "") -> str:
+    """Format graph-derived values for student-facing fallback solutions."""
+    if isinstance(value, (int, float)):
+        if abs(value) >= 100:
+            formatted = f"{value:.1f}"
+        elif abs(value) >= 10:
+            formatted = f"{value:.2f}"
+        else:
+            formatted = f"{value:.3f}".rstrip("0").rstrip(".")
+    else:
+        formatted = str(value)
+
+    return f"{formatted} {unit}".strip()
+
+
+def _parameter_map(payload: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    return {
+        parameter.get("symbol"): parameter
+        for parameter in payload.get("parameters", [])
+        if parameter.get("symbol")
+    }
+
+
+def _parameter_value(parameters: Dict[str, Dict[str, Any]], symbol: str) -> str:
+    parameter = parameters[symbol]
+    return _format_graph_value(parameter.get("value"), parameter.get("unit", ""))
+
+
+def _build_kinematics_fallback_solution(graph_result: Dict[str, Any]) -> Optional[str]:
+    """Create a deterministic solution when the LLM is unavailable.
+
+    The graph builder has already parsed the prompt and solved the same values
+    used by the rendered graph, so this keeps the text answer and graph aligned.
+    """
+    graph_payloads = graph_result.get("graphs") or []
+    if not graph_payloads:
+        return None
+
+    payload = graph_payloads[0]
+    parameters = _parameter_map(payload)
+    motion_type = payload.get("motionType")
+
+    if motion_type in {"uniform_motion", "constant_acceleration"} and all(
+        symbol in parameters for symbol in ("x0", "v0", "a", "t", "v", "dx")
+    ):
+        x0 = _parameter_value(parameters, "x0")
+        v0 = _parameter_value(parameters, "v0")
+        acceleration = _parameter_value(parameters, "a")
+        duration = _parameter_value(parameters, "t")
+        final_velocity = _parameter_value(parameters, "v")
+        displacement = _parameter_value(parameters, "dx")
+
+        return (
+            "**Solution**\n\n"
+            f"Known values: x0 = {x0}, v0 = {v0}, a = {acceleration}, t = {duration}.\n\n"
+            "Use the constant-acceleration equations:\n\n"
+            "- v = v0 + at\n"
+            "- dx = v0*t + 0.5*a*t^2\n\n"
+            f"Final velocity: v = {v0} + ({acceleration})({duration}) = {final_velocity}.\n\n"
+            f"Displacement: dx = ({v0})({duration}) + 0.5({acceleration})({duration})^2 = {displacement}.\n\n"
+            f"Final answer: after {duration}, the car's velocity is {final_velocity} and it has traveled {displacement}."
+        )
+
+    if motion_type == "projectile_motion" and all(
+        symbol in parameters for symbol in ("v0", "theta", "h0", "g", "T", "R", "hmax")
+    ):
+        launch_speed = _parameter_value(parameters, "v0")
+        angle = _parameter_value(parameters, "theta")
+        height = _parameter_value(parameters, "h0")
+        gravity = _parameter_value(parameters, "g")
+        flight_time = _parameter_value(parameters, "T")
+        range_value = _parameter_value(parameters, "R")
+        max_height = _parameter_value(parameters, "hmax")
+
+        return (
+            "**Solution**\n\n"
+            f"Known values: launch speed = {launch_speed}, angle = {angle}, initial height = {height}, g = {gravity}.\n\n"
+            "Use projectile motion:\n\n"
+            "- x = x0 + v0x*t\n"
+            "- y = h0 + v0y*t - 0.5*g*t^2\n"
+            "- vy = v0y - g*t\n\n"
+            f"Final answer: flight time is {flight_time}, horizontal range is {range_value}, "
+            f"and maximum height is {max_height}."
+        )
+
+    if motion_type == "piecewise_kinematics" and all(
+        symbol in parameters for symbol in ("stages", "T", "x final", "v final")
+    ):
+        stages = _parameter_value(parameters, "stages")
+        total_time = _parameter_value(parameters, "T")
+        final_position = _parameter_value(parameters, "x final")
+        final_velocity = _parameter_value(parameters, "v final")
+
+        return (
+            "**Solution**\n\n"
+            f"The motion has {stages}. The final state is computed by applying each stage in order, "
+            "using the previous stage's final position and velocity as the next stage's initial values.\n\n"
+            f"Final answer: total time is {total_time}, final position is {final_position}, "
+            f"and final velocity is {final_velocity}."
+        )
+
+    return None
+
 # API Endpoints
 
 @app.get("/")
@@ -289,6 +393,25 @@ async def solve_problem(
                 status_code=400,
                 detail=f"Invalid agent_id: {agent_id}. Must be one of: {', '.join(ALL_VALID_AGENTS)}"
             )
+
+        if agent_id == "kinematics_agent":
+            graph_result = build_kinematics_graphs_from_context(request.problem, request.context)
+            fallback_solution = _build_kinematics_fallback_solution(graph_result)
+            if fallback_solution:
+                return ProblemSolveResponse(
+                    success=True,
+                    agent_id=agent_id,
+                    problem=request.problem,
+                    solution=fallback_solution,
+                    reasoning="Used deterministic kinematics equations to keep the solution and graph aligned.",
+                    tools_used=["kinematics_graph_builder"],
+                    metadata={
+                        "graphs": graph_result["graphs"],
+                        "graph_warnings": graph_result["warnings"],
+                        "graph_errors": graph_result["errors"],
+                        "graph_inputs": graph_result["parsed_inputs"],
+                    },
+                )
         
         # Get or create agent
         agent = await get_or_create_agent(agent_id, use_direct_tools, enable_rag, rag_api_url)
@@ -311,6 +434,21 @@ async def solve_problem(
             metadata["graph_errors"] = graph_result["errors"]
             metadata["graph_inputs"] = graph_result["parsed_inputs"]
             result["metadata"] = metadata
+
+            if not result.get("solution") and graph_result["graphs"]:
+                fallback_solution = _build_kinematics_fallback_solution(graph_result)
+                if fallback_solution:
+                    if result.get("error"):
+                        metadata["agent_error"] = result["error"]
+                    result.update(
+                        {
+                            "success": True,
+                            "solution": fallback_solution,
+                            "reasoning": "Used deterministic kinematics equations to keep the solution and graph aligned.",
+                            "tools_used": result.get("tools_used") or ["kinematics_graph_builder"],
+                            "error": None,
+                        }
+                    )
 
             if (
                 not graph_result["graphs"]
