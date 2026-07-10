@@ -96,6 +96,9 @@ python -c "import fastapi, uvicorn, streamlit; print('✅ All dependencies insta
 
 ## 🤖 Available Physics Agents
 
+### Guided Tutoring Workflow
+Problem-solving and conceptual physics questions now go through a guided tutoring checkpoint before a full solution is shown. The assistant classifies the PHYS 1201/1202 topic, asks students for the relevant setup, diagram, knowns/unknowns, assumptions, equation choice, units, or current conceptual thinking, then advances one checkpoint at a time. A complete worked solution is only allowed after guided interaction or when the student explicitly asks for a worked example. See `api/GUIDED_TUTORING_HANDOFF.md` for implementation and handoff details.
+
 ### Forces Agent (`forces_agent`)
 **Specialization**: Force analysis and Newton's laws
 - Free body diagram creation

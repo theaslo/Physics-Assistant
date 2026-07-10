@@ -14,6 +14,7 @@ from strands import Agent
 from strands.models.ollama import OllamaModel
 from strands.tools.mcp import MCPClient
 from mcp.client.streamable_http import streamablehttp_client
+from guided_tutoring import append_guided_tutoring_policy, apply_full_solution_instruction
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +165,7 @@ class StrandsPhysicsAgent(ABC):
             self.agent = Agent(
                 model=ollama_model,
                 tools=tools,
-                system_prompt=self._get_system_prompt(),
+                system_prompt=append_guided_tutoring_policy(self._get_system_prompt()),
                 name=self.agent_id,
                 description=self._get_description(),
             )
@@ -219,6 +220,8 @@ class StrandsPhysicsAgent(ABC):
                         augmented_problem = self._integrate_rag_context(problem, rag_context)
                 except Exception as e:
                     logger.warning(f"RAG context retrieval failed: {e}")
+
+            augmented_problem = apply_full_solution_instruction(augmented_problem, context)
 
             # Call the Strands agent
             logger.info(f"Solving problem with {self.agent_id}: {problem[:50]}...")

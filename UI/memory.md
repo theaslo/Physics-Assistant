@@ -233,3 +233,156 @@ The system now successfully provides:
 - **Stable User Experience:** No navigation issues or state conflicts
 
 **Ready for production use with 5/6 agents fully functional.**
+
+### Guided Tutoring Workflow Added (July 2026)
+
+**Problem:** The assistant was giving complete solutions immediately for problem-solving prompts, including through the kinematics graph fallback path.
+
+**Files Added/Modified:**
+- `/api/guided_tutoring.py` - Central guided tutoring gate, topic diagnostics, misconception handling, and full-solution approval context
+- `/api/main.py` - Runs the tutoring gate before Strands agents or kinematics fallback solutions
+- `/api/strands_agents/base_physics_agent.py` - Appends the shared tutoring policy to all Strands prompts and honors approved full-solution requests
+- `/api/test_guided_tutoring.py` - Tests ten representative PHYS 1201/1202 problems, misconceptions, and full-solution switching
+- `/api/GUIDED_TUTORING_HANDOFF.md` - Handoff documentation for guided behavior and switch criteria
+- `/../student-ui/src/pages/ChatPage.tsx` and `/../student-ui/src/services/api-client.ts` - Sends recent conversation context from the React UI
+
+**Behavior Implemented:**
+- First problem-solving turn asks diagnostic questions instead of solving.
+- The assistant checks concepts, diagrams, knowns/unknowns, equation choice, assumptions, and units.
+- Student attempts receive targeted next-step hints.
+- Misconceptions receive focused corrections and follow-up questions.
+- Full worked solutions are allowed after guided interaction, after a visible reasoning attempt plus a full-solution request, or immediately for explicit worked-example requests.
+
+**Verification:**
+- `python3 -m unittest test_guided_tutoring.py` passed
+- `python3 -m unittest test_kinematics_graphs.py` passed
+- `python3 -m py_compile guided_tutoring.py main.py strands_agents/base_physics_agent.py test_guided_tutoring.py` passed
+- `npm run build` in `student-ui` passed with only the existing Vite chunk-size warning
+
+### Guided Tutoring Generalization (July 2026)
+
+**Problem:** The first guided implementation worked structurally, but it was too generic and felt tied to seeded examples. It also let the frontend pre-create agents, so a first guided message for a domain could fail if that domain's MCP server was not already running.
+
+**Files Updated:**
+- `/api/guided_tutoring.py` - Added random prompt profiling, quantity/unit extraction, model inference, equation candidates, graph-specific scaffolding, and better compact unit handling
+- `/api/test_guided_tutoring.py` - Added random Forces, Thermodynamics, and projectile graph tests
+- `/../student-ui/src/pages/ChatPage.tsx` - Removed pre-message agent creation so guided checkpoints can run before MCP/LLM initialization
+- `/api/GUIDED_TUTORING_HANDOFF.md` - Documented the generalized prompt profiler and graph workflow
+
+**Behavior Implemented:**
+- Random prompts now show parsed knowns/unknowns, likely model, diagram/setup checkpoint, and equation candidates.
+- Graph prompts now ask for axes, units, governing functions, qualitative shape, and missing assumptions before plotting.
+- Initial guided checkpoints no longer require the selected agent's MCP server to be running.
+
+**Verification:**
+- `./.venv/bin/python -m unittest test_guided_tutoring.py test_kinematics_graphs.py` passed
+- `npm run build` in `student-ui` passed with only the existing Vite chunk-size warning
+- Live proxy checks passed for a random Forces prompt and a random projectile graph prompt
+
+### Guided Tutoring Acceptance Pass (July 2026)
+
+**Problem:** The full Human-in-the-Loop requirement also needed an explicit topic classifier, conceptual-question tutoring, exact representative template coverage, and broader PHYS 1201/1202 topic support.
+
+**Files Updated:**
+- `/api/guided_tutoring.py` - Added `classify_physics_topic()`, conceptual checkpoints, exact required templates, and stronger topic/equation handling for oscillations, torque equilibrium, electric potential, circuits, magnetism, and optics
+- `/api/test_guided_tutoring.py` - Added classifier tests, conceptual tutoring tests, and exact coverage checks for the 10 required representative templates
+- `/api/GUIDED_TUTORING_HANDOFF.md` - Documented the modular controller, classifier, conceptual mode, graph mode, and full-solution switch rules
+- `/README.md` - Updated guided tutoring summary for the UI package
+
+**Verification:**
+- `./.venv/bin/python -m unittest test_guided_tutoring.py test_kinematics_graphs.py` passed with 36 tests
+
+### Guided Tutoring Piecewise Kinematics Fix (July 2026)
+
+**Problem:** Piecewise kinematics prompts such as a runner moving at one speed and then stopping were being routed to the generic constant-acceleration graph scaffold.
+
+**Files Updated:**
+- `/api/guided_tutoring.py` - Added piecewise kinematics classification, interval parsing, graph checkpoints, and non-graph piecewise distance guidance
+- `/api/test_guided_tutoring.py` - Added exact runner regression tests ensuring the response uses intervals, horizontal velocity-time segments, and area under the graph instead of constant-acceleration equations
+- `/api/GUIDED_TUTORING_HANDOFF.md` - Documented piecewise kinematics behavior
+
+**Verification:**
+- `./.venv/bin/python -m unittest test_guided_tutoring.py test_kinematics_graphs.py` passed with 38 tests
+
+### Guided Tutoring Kinematics Checkpoint Tone Fix (July 2026)
+
+**Problem:** The runner piecewise prompt needed neutral first-turn wording and one student action, while the constant-acceleration car graph prompt was still too formula-heavy on the first checkpoint.
+
+**Files Updated:**
+- `/api/guided_tutoring.py` - Made piecewise first-turn wording neutral/single-action; changed constant-acceleration graph first checkpoint to show knowns only and reveal `v(t) = v0 + a*t` after setup confirmation
+- `/api/test_guided_tutoring.py` - Added regression tests for the exact runner and car graph prompts
+- `/api/GUIDED_TUTORING_HANDOFF.md` - Documented the delayed-equation constant-acceleration graph flow
+
+**Verification:**
+- `./.venv/bin/python -m unittest test_guided_tutoring.py test_kinematics_graphs.py` passed with 40 tests
+
+### Guided Tutoring Vertical Projectile Classification Fix (July 2026)
+
+**Problem:** Vertical throw prompts such as a ball thrown upward at 20 m/s were being classified as general projectile motion, causing the tutor to ask for sine/cosine horizontal and vertical components when no launch angle or horizontal motion was present.
+
+**Files Updated:**
+- `/api/guided_tutoring.py` - Added kinematics sub-classification for vertical motion, free fall, horizontal launch, and angled projectile motion; added vertical and horizontal-launch first checkpoints; kept sine/cosine decomposition only for explicit angled/component projectile prompts
+- `/api/test_guided_tutoring.py` - Added regression tests for upward vertical throw, downward vertical throw, free fall from rest, angled projectile, and horizontal launch from a cliff
+- `/api/GUIDED_TUTORING_HANDOFF.md` - Documented the vertical/projectile distinction and horizontal-launch behavior
+
+**Verification:**
+- `./.venv/bin/python -m unittest discover -p 'test*.py'` passed with 45 tests
+- `./.venv/bin/python -m py_compile guided_tutoring.py main.py strands_agents/base_physics_agent.py test_guided_tutoring.py` passed
+- `npm run build` in `student-ui` passed with only the existing Vite chunk-size warning
+
+### Guided Tutoring Piecewise State Advancement Fix (July 2026)
+
+**Problem:** In the runner piecewise velocity-time graph flow, the tutor repeated "what does the area under each horizontal segment represent?" after the student correctly answered "distance traveled."
+
+**Files Updated:**
+- `/api/guided_tutoring.py` - Added last-checkpoint-aware piecewise graph state handling so correct responses advance through area meaning, first rectangle, second rectangle, and total distance
+- `/api/test_guided_tutoring.py` - Added regression tests for the exact repeat bug and the full runner step progression
+- `/api/GUIDED_TUTORING_HANDOFF.md` - Documented the piecewise graph state progression rule
+
+**Verification:**
+- `./.venv/bin/python -m unittest discover -p 'test*.py'` passed with 47 tests
+- `./.venv/bin/python -m py_compile guided_tutoring.py main.py strands_agents/base_physics_agent.py test_guided_tutoring.py` passed
+- `npm run build` in `student-ui` passed with only the existing Vite chunk-size warning
+
+### Guided Tutoring Piecewise Long-State Fix (July 2026)
+
+**Problem:** In longer runner piecewise graph conversations, a correct Interval 1 answer such as `20 m` could reset the tutor back to the first interval-confirmation checkpoint when the previous tutor wording was a variant like `Use area = velocity × time for Interval 1.`
+
+**Files Updated:**
+- `/api/guided_tutoring.py` - Replaced exact string matching with meaning-based piecewise checkpoint classification; the flow now advances through interval confirmation, area meaning, Interval 1, Interval 2, total distance, and velocity-time graph description
+- `/api/test_guided_tutoring.py` - Added multi-turn regression tests covering the alternate Interval 1 wording and 10+ message runner flow without reset
+- `/api/GUIDED_TUTORING_HANDOFF.md` - Updated piecewise graph state documentation
+- `student-ui/src/pages/ChatPage.tsx` - Increased recent conversation context from 6 to 20 messages so long guided sessions keep the original problem available
+
+**Verification:**
+- `./.venv/bin/python -m unittest discover -p 'test*.py'` passed with 49 tests
+- `./.venv/bin/python -m py_compile guided_tutoring.py main.py strands_agents/base_physics_agent.py test_guided_tutoring.py` passed
+- `npm run build` in `student-ui` passed with only the existing Vite chunk-size warning
+
+### Guided Tutoring Piecewise Confirmation Routing Fix (July 2026)
+
+**Problem:** After the runner piecewise graph prompt, a short confirmation like `yes confirm` was treated as no student attempt and routed to the generic equation-selection checkpoint.
+
+**Files Updated:**
+- `/api/guided_tutoring.py` - Added an active specialized workflow pass before the generic no-attempt fallback; piecewise graph confirmation checkpoints now accept short confirmations or explicit interval restatements and advance to the area-under-graph checkpoint
+- `/api/test_guided_tutoring.py` - Added regression tests for `yes`, `confirm`, `correct`, `yes confirm`, and a full short-confirmation runner flow that never uses the generic kinematics equation prompt
+- `/api/GUIDED_TUTORING_HANDOFF.md` - Documented specialized workflow routing before generic fallback
+
+**Verification:**
+- `./.venv/bin/python -m unittest discover -p 'test*.py'` passed with 51 tests
+- `./.venv/bin/python -m py_compile guided_tutoring.py main.py strands_agents/base_physics_agent.py test_guided_tutoring.py` passed
+- `npm run build` in `student-ui` passed with only the existing Vite chunk-size warning
+
+### Guided Tutoring Piecewise Branch Lock Fix (July 2026)
+
+**Problem:** A later runner graph response that mentioned the velocity-time graph could become the active problem text, causing the tutor to leave the piecewise workflow and fall into the generic 1D graph scaffold with `x(t)`, `v(t)`, and `a(t)` constant-acceleration formulas.
+
+**Files Updated:**
+- `/api/guided_tutoring.py` - Active problem selection now keeps the earlier problem during guided follow-ups unless the student clearly starts a new problem
+- `/api/test_guided_tutoring.py` - Added regression tests proving the runner piecewise workflow reaches completion without branch switching or generic graph/equation prompts, including a graph-description reply containing the word `graph`
+- `/api/GUIDED_TUTORING_HANDOFF.md` - Documented the active-problem lock for specialized workflows
+
+**Verification:**
+- `./.venv/bin/python -m unittest discover -p 'test*.py'` passed with 53 tests
+- `./.venv/bin/python -m py_compile guided_tutoring.py main.py strands_agents/base_physics_agent.py test_guided_tutoring.py` passed
+- `npm run build` in `student-ui` passed with only the existing Vite chunk-size warning

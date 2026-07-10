@@ -395,6 +395,11 @@ def _build_piecewise_kinematics_graph_response(problem: str) -> Dict[str, Any]:
 
         parsed["x0"] = state["x0"]
 
+        if _segment_is_rest_interval(segment_text):
+            parsed["v0"] = 0.0
+            parsed["v"] = 0.0
+            parsed["a"] = 0.0
+
         if _segment_is_constant_speed(segment_text) and "a" not in parsed:
             parsed["a"] = 0.0
             parsed.setdefault("v", parsed["v0"])
@@ -464,7 +469,29 @@ def _split_motion_segments(problem: str) -> List[str]:
 
 def _segment_is_constant_speed(segment_text: str) -> bool:
     text = _normalize_text(segment_text)
-    return any(phrase in text for phrase in ("constant speed", "constant velocity", "coasts", "coast", "continues at that speed", "same speed"))
+    return any(
+        phrase in text
+        for phrase in (
+            "constant speed",
+            "constant velocity",
+            "coasts",
+            "coast",
+            "continues at that speed",
+            "same speed",
+            "is stopped",
+            "stops for",
+            "rests for",
+            "at rest for",
+        )
+    )
+
+
+def _segment_is_rest_interval(segment_text: str) -> bool:
+    text = _normalize_text(segment_text)
+    return bool(
+        re.search(r"\b(?:stops?|is stopped|rests?|is at rest|remains at rest|waits)\s+for\b", text)
+        or "at rest for" in text
+    )
 
 
 def _build_piecewise_payload(problem: str, segments: List[Dict[str, Any]], warnings: List[str]) -> Dict[str, Any]:
@@ -532,6 +559,11 @@ def _build_piecewise_payload(problem: str, segments: List[Dict[str, Any]], warni
                     "description": segment["text"],
                     "start_time": _round(segment["start_time"]),
                     "end_time": _round(segment["end_time"]),
+                    "duration": _round(segment["t"]),
+                    "initial_position": _round(segment["x0"]),
+                    "final_position": _round(segment["x"]),
+                    "initial_velocity": _round(segment["v0"]),
+                    "final_velocity": _round(segment["v"]),
                     "acceleration": _round(segment["a"]),
                 }
                 for segment in segments

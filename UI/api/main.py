@@ -16,6 +16,7 @@ from physics_graphs import (
     build_kinematics_graphs_from_context,
     should_attempt_kinematics_graph,
 )
+from guided_tutoring import active_problem_from_context, evaluate_guided_tutoring, merge_tutoring_context
 
 # Import all Strands-based agents
 from strands_agents import (
@@ -232,6 +233,8 @@ def _format_graph_value(value: Any, unit: str = "") -> str:
             formatted = f"{value:.2f}"
         else:
             formatted = f"{value:.3f}".rstrip("0").rstrip(".")
+        if "." in formatted:
+            formatted = formatted.rstrip("0").rstrip(".")
     else:
         formatted = str(value)
 
@@ -315,6 +318,73 @@ def _build_kinematics_fallback_solution(graph_result: Dict[str, Any]) -> Optiona
         total_time = _parameter_value(parameters, "T")
         final_position = _parameter_value(parameters, "x final")
         final_velocity = _parameter_value(parameters, "v final")
+        source_segments = ((payload.get("source") or {}).get("segments") or [])
+
+        if source_segments:
+            known_lines = []
+            distance_lines = []
+            graph_lines = []
+            total_distance = 0.0
+
+            for index, segment in enumerate(source_segments, start=1):
+                start = float(segment.get("start_time", 0.0))
+                end = float(segment.get("end_time", start))
+                duration = float(segment.get("duration", max(end - start, 0.0)))
+                initial_velocity = float(segment.get("initial_velocity", 0.0))
+                final_velocity_value = float(segment.get("final_velocity", initial_velocity))
+                acceleration = float(segment.get("acceleration", 0.0))
+                initial_position = float(segment.get("initial_position", 0.0))
+                final_position_value = float(segment.get("final_position", initial_position))
+                displacement = final_position_value - initial_position
+                distance = abs(displacement)
+                total_distance += distance
+
+                known_lines.append(
+                    f"- Interval {index}: {_format_graph_value(start, 's')} to {_format_graph_value(end, 's')}, "
+                    f"v = {_format_graph_value(initial_velocity, 'm/s')}"
+                    if abs(acceleration) < 1e-9 and abs(final_velocity_value - initial_velocity) < 1e-9
+                    else (
+                        f"- Interval {index}: {_format_graph_value(start, 's')} to {_format_graph_value(end, 's')}, "
+                        f"v0 = {_format_graph_value(initial_velocity, 'm/s')}, "
+                        f"a = {_format_graph_value(acceleration, 'm/s^2')}"
+                    )
+                )
+
+                if abs(acceleration) < 1e-9 and abs(final_velocity_value - initial_velocity) < 1e-9:
+                    distance_lines.append(
+                        f"- Interval {index}: distance = |v|*Delta t = "
+                        f"|{_format_graph_value(initial_velocity, 'm/s')}|({_format_graph_value(duration, 's')}) "
+                        f"= {_format_graph_value(distance, 'm')}"
+                    )
+                    graph_lines.append(
+                        f"- Interval {index}: horizontal at {_format_graph_value(initial_velocity, 'm/s')} "
+                        f"from {_format_graph_value(start, 's')} to {_format_graph_value(end, 's')}"
+                    )
+                else:
+                    distance_lines.append(
+                        f"- Interval {index}: displacement = v0*t + 0.5*a*t^2 = "
+                        f"{_format_graph_value(displacement, 'm')}; distance = {_format_graph_value(distance, 'm')}"
+                    )
+                    graph_lines.append(
+                        f"- Interval {index}: velocity changes linearly from "
+                        f"{_format_graph_value(initial_velocity, 'm/s')} to "
+                        f"{_format_graph_value(final_velocity_value, 'm/s')}"
+                    )
+
+            return (
+                "**Solution**\n\n"
+                "This is piecewise motion, so solve each interval separately. "
+                "There is no single constant-acceleration equation for the whole motion.\n\n"
+                "Known intervals:\n"
+                f"{chr(10).join(known_lines)}\n\n"
+                "Distances from area under the velocity-time graph:\n"
+                f"{chr(10).join(distance_lines)}\n\n"
+                f"Total distance = {_format_graph_value(total_distance, 'm')}.\n\n"
+                "Velocity-time graph:\n"
+                f"{chr(10).join(graph_lines)}\n\n"
+                f"Final answer: over {total_time}, the total distance traveled is "
+                f"{_format_graph_value(total_distance, 'm')}. The final velocity is {final_velocity}."
+            )
 
         return (
             "**Solution**\n\n"
@@ -328,6 +398,7 @@ def _build_kinematics_fallback_solution(graph_result: Dict[str, Any]) -> Optiona
 
 # API Endpoints
 
+@app.get("/api/")
 @app.get("/")
 async def root():
     """Root endpoint with API information"""
@@ -345,6 +416,7 @@ async def root():
         }
     }
 
+@app.post("/api/agent/create", response_model=AgentCreateResponse)
 @app.post("/agent/create", response_model=AgentCreateResponse)
 async def create_agent(request: AgentCreateRequest) -> AgentCreateResponse:
     """
@@ -375,6 +447,7 @@ async def create_agent(request: AgentCreateRequest) -> AgentCreateResponse:
             detail=f"Failed to create agent: {str(e)}"
         )
 
+@app.post("/api/agent/{agent_id}/solve", response_model=ProblemSolveResponse)
 @app.post("/agent/{agent_id}/solve", response_model=ProblemSolveResponse)
 async def solve_problem(
     agent_id: str,
@@ -386,6 +459,7 @@ async def solve_problem(
     """
     Solve a physics problem using the specified agent
     """
+    start_time = asyncio.get_event_loop().time()
     try:
         # Validate agent_id
         if agent_id not in ALL_VALID_AGENTS:
@@ -394,8 +468,28 @@ async def solve_problem(
                 detail=f"Invalid agent_id: {agent_id}. Must be one of: {', '.join(ALL_VALID_AGENTS)}"
             )
 
+        tutoring_decision = evaluate_guided_tutoring(
+            agent_id=agent_id,
+            message=request.problem,
+            context=request.context,
+        )
+        agent_context = merge_tutoring_context(request.context, tutoring_decision)
+        solver_problem = active_problem_from_context(agent_id, request.problem, request.context)
+
+        if tutoring_decision.intercept:
+            return ProblemSolveResponse(
+                success=True,
+                agent_id=agent_id,
+                problem=request.problem,
+                solution=tutoring_decision.response,
+                reasoning="Guided tutoring workflow asked for diagnostic setup before a full solution.",
+                tools_used=["guided_tutoring"],
+                execution_time_ms=int((asyncio.get_event_loop().time() - start_time) * 1000),
+                metadata={"guided_tutoring": agent_context["guided_tutoring"]},
+            )
+
         if agent_id == "kinematics_agent":
-            graph_result = build_kinematics_graphs_from_context(request.problem, request.context)
+            graph_result = build_kinematics_graphs_from_context(solver_problem, agent_context)
             fallback_solution = _build_kinematics_fallback_solution(graph_result)
             if fallback_solution:
                 return ProblemSolveResponse(
@@ -410,6 +504,7 @@ async def solve_problem(
                         "graph_warnings": graph_result["warnings"],
                         "graph_errors": graph_result["errors"],
                         "graph_inputs": graph_result["parsed_inputs"],
+                        "guided_tutoring": agent_context["guided_tutoring"],
                     },
                 )
         
@@ -421,19 +516,21 @@ async def solve_problem(
         # Solve the problem with user and session context for database logging
         result = await agent.solve_problem(
             problem=request.problem, 
-            context=request.context,
+            context=agent_context,
             user_id=request.user_id,
             session_id=request.session_id
         )
 
+        metadata = dict(result.get("metadata") or {})
+        metadata["guided_tutoring"] = agent_context["guided_tutoring"]
+        result["metadata"] = metadata
+
         if agent_id == "kinematics_agent":
-            graph_result = build_kinematics_graphs_from_context(request.problem, request.context)
-            metadata = dict(result.get("metadata") or {})
+            graph_result = build_kinematics_graphs_from_context(solver_problem, agent_context)
             metadata["graphs"] = graph_result["graphs"]
             metadata["graph_warnings"] = graph_result["warnings"]
             metadata["graph_errors"] = graph_result["errors"]
             metadata["graph_inputs"] = graph_result["parsed_inputs"]
-            result["metadata"] = metadata
 
             if not result.get("solution") and graph_result["graphs"]:
                 fallback_solution = _build_kinematics_fallback_solution(graph_result)
@@ -453,7 +550,7 @@ async def solve_problem(
             if (
                 not graph_result["graphs"]
                 and graph_result["errors"]
-                and should_attempt_kinematics_graph(request.problem, request.context)
+                and should_attempt_kinematics_graph(solver_problem, request.context)
                 and result.get("solution")
             ):
                 result["solution"] += "\n\nGraph note: " + " ".join(graph_result["errors"])
@@ -471,6 +568,7 @@ async def solve_problem(
             error=str(e)
         )
 
+@app.post("/api/kinematics/graphs", response_model=KinematicsGraphResponse)
 @app.post("/kinematics/graphs", response_model=KinematicsGraphResponse)
 async def create_kinematics_graphs(request: KinematicsGraphRequest) -> KinematicsGraphResponse:
     """
@@ -489,6 +587,7 @@ async def create_kinematics_graphs(request: KinematicsGraphRequest) -> Kinematic
         parsed_inputs=graph_result["parsed_inputs"],
     )
 
+@app.get("/api/agent/{agent_id}/health", response_model=AgentHealthResponse)
 @app.get("/agent/{agent_id}/health", response_model=AgentHealthResponse)
 async def check_agent_health(
     agent_id: str,
@@ -520,6 +619,7 @@ async def check_agent_health(
             detail=f"Failed to check agent health: {str(e)}"
         )
 
+@app.get("/api/agent/{agent_id}/capabilities")
 @app.get("/agent/{agent_id}/capabilities")
 async def get_agent_capabilities(
     agent_id: str,
@@ -551,6 +651,7 @@ async def get_agent_capabilities(
             detail=f"Failed to get agent capabilities: {str(e)}"
         )
 
+@app.get("/api/agents/list")
 @app.get("/agents/list")
 async def list_available_agents():
     """
@@ -656,6 +757,7 @@ async def list_available_agents():
 #         "active_agents": list(agent_store.keys())
 #     }
 
+@app.delete("/api/agent/{agent_id}")
 @app.delete("/agent/{agent_id}")
 async def remove_agent(agent_id: str, use_direct_tools: bool = True):
     """

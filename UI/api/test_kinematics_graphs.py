@@ -1,5 +1,6 @@
 import unittest
 
+from main import _build_kinematics_fallback_solution
 from physics_graphs import (
     KINEMATICS_EXAMPLE_PROBLEMS,
     PROJECTILE_EXAMPLE_PROBLEMS,
@@ -119,6 +120,28 @@ class KinematicsGraphTests(unittest.TestCase):
         self.assertEqual(payload["type"], "kinematics_piecewise")
         self.assertEqual(payload["motionType"], "piecewise_kinematics")
         self.assertEqual(len(payload["graphs"]), 3)
+
+    def test_piecewise_runner_rest_interval_and_fallback_solution(self):
+        result = build_kinematics_graph_response(
+            "A runner moves at 4 m/s for 5 s and then stops for 3 s. Find the total distance traveled and draw the velocity-time graph."
+        )
+
+        self.assertEqual(result["errors"], [])
+        payload = result["graphs"][0]
+        self.assertEqual(payload["motionType"], "piecewise_kinematics")
+        parameters = {parameter["symbol"]: parameter["value"] for parameter in payload["parameters"]}
+        self.assertEqual(parameters["T"], 8)
+        self.assertEqual(parameters["x final"], 20)
+        self.assertEqual(parameters["v final"], 0)
+
+        segments = payload["source"]["segments"]
+        self.assertEqual(segments[1]["initial_velocity"], 0)
+        self.assertEqual(segments[1]["final_velocity"], 0)
+
+        solution = _build_kinematics_fallback_solution(result)
+        self.assertIn("Total distance = 20 m", solution)
+        self.assertIn("horizontal at 4 m/s from 0 s to 5 s", solution)
+        self.assertIn("horizontal at 0 m/s from 5 s to 8 s", solution)
 
     def test_structured_projectile_components(self):
         result = build_kinematics_graph_response(

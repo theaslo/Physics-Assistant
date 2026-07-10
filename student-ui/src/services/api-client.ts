@@ -93,11 +93,13 @@ class PhysicsAPIClient {
   async sendMessage(
     agentId: string,
     message: string,
-    userId: string = 'react_user'
+    userId: string = 'react_user',
+    context?: Record<string, unknown>
   ): Promise<SolveResponse> {
     const response = await this.api.post<SolveResponse>(`/agent/${agentId}/solve`, {
       problem: message,
       user_id: userId,
+      context,
     })
     return response.data
   }

@@ -25,6 +25,36 @@ import PhysicsConstants from '../components/PhysicsConstants'
 import { getAgentIcon } from '../themes/uconn-theme'
 
 const DRAWER_WIDTH = 280
+const FULL_SOLUTION_REQUEST_RE = /\b(show\s+me\s+the\s+full\s+solution|full\s+solution|worked\s+solution|worked\s+example)\b/i
+const PHYSICS_PROBLEM_CUES_RE =
+  /\b(find|calculate|determine|compute|solve|draw|graph|how\s+(far|long|fast|high|much)|what\s+is)\b/i
+const PHYSICS_CONTEXT_RE =
+  /\b(m\/s|m\/s\^?2|newton|force|velocity|acceleration|distance|displacement|graph|time|seconds?|runner|car|ball|block|charge|circuit|field|energy|momentum|torque|wave|lens|projectile)\b/i
+
+function looksLikePhysicsProblem(text: string) {
+  return PHYSICS_PROBLEM_CUES_RE.test(text) && PHYSICS_CONTEXT_RE.test(text)
+}
+
+function inferActiveProblem(
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+  currentMessage: string
+) {
+  const candidates = [
+    ...messages,
+    { role: 'user' as const, content: currentMessage },
+  ]
+
+  for (let index = candidates.length - 1; index >= 0; index -= 1) {
+    const candidate = candidates[index]
+    if (candidate.role !== 'user') continue
+
+    const content = candidate.content.trim()
+    if (!content || FULL_SOLUTION_REQUEST_RE.test(content)) continue
+    if (looksLikePhysicsProblem(content)) return content
+  }
+
+  return undefined
+}
 
 export default function ChatPage() {
   const theme = useTheme()
@@ -93,14 +123,22 @@ export default function ChatPage() {
       setError(null)
 
       try {
-        // Ensure agent is created
-        await apiClient.createAgent(selectedAgent)
+        const conversationContext = {
+          active_problem: inferActiveProblem(messages, message),
+          recent_conversation: [...messages, userMessage].slice(-20).map((msg) => ({
+            role: msg.role,
+            content: msg.content,
+            timestamp: msg.timestamp,
+          })),
+          total_messages: messages.length + 1,
+        }
 
         // Send message
         const response = await apiClient.sendMessage(
           selectedAgent,
           message,
-          user?.username || 'react_user'
+          user?.username || 'react_user',
+          conversationContext
         )
 
         if (response.success && response.solution) {
@@ -127,7 +165,7 @@ export default function ChatPage() {
         setLoading(false)
       }
     },
-    [selectedAgent, user, addMessage, setLoading, setError]
+    [selectedAgent, user, messages, addMessage, setLoading, setError]
   )
 
   // Sidebar content
