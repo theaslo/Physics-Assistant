@@ -7,7 +7,9 @@ import asyncio
 import os
 import json
 import logging
+import re
 import uuid
+from pathlib import Path
 from typing import Dict, List, Optional, Any, Union
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
@@ -20,6 +22,99 @@ from dotenv import load_dotenv
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+SCHEMA_FILE = Path(__file__).resolve().parent / "schema" / "01_core_tables.sql"
+
+CANONICAL_AGENT_TYPES = {
+    "kinematics",
+    "forces",
+    "energy",
+    "momentum",
+    "angular_motion",
+    "math",
+    "math_helper",
+    "thermodynamics",
+    "waves",
+    "electromagnetism",
+    "optics",
+    "modern_physics",
+}
+
+AGENT_TYPE_ALIASES = {
+    "force": "forces",
+    "forces": "forces",
+    "kinematic": "kinematics",
+    "kinematics": "kinematics",
+    "angular": "angular_motion",
+    "angular_motion": "angular_motion",
+    "angularmotion": "angular_motion",
+    "math": "math",
+    "math_helper": "math",
+    "momentum": "momentum",
+    "energy": "energy",
+    "thermodynamics": "thermodynamics",
+    "thermodynamic": "thermodynamics",
+    "waves": "waves",
+    "wave": "waves",
+    "electromagnetism": "electromagnetism",
+    "electromagnetic": "electromagnetism",
+    "em": "electromagnetism",
+    "optics": "optics",
+    "optic": "optics",
+    "modern_physics": "modern_physics",
+    "modernphysics": "modern_physics",
+}
+
+INTERACTION_TYPE_ALIASES = {
+    "chat": "chat",
+    "mcp_tool": "mcp_tool",
+    "tool_call": "mcp_tool",
+    "agent_call": "agent_call",
+    "agent": "agent_call",
+    "file_upload": "file_upload",
+    "calculation": "calculation",
+}
+
+
+def normalize_agent_type(agent_type: Optional[str]) -> Optional[str]:
+    """Normalize UI, Strands, MCP, and legacy agent IDs to enum values."""
+    if not agent_type:
+        return None
+
+    normalized = agent_type.strip().lower().replace("-", "_").replace(" ", "_")
+    normalized = re.sub(r"_+", "_", normalized)
+
+    for prefix in ("physics_", "mcp_"):
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix):]
+
+    for suffix in ("_agent", "_mcp_server", "_server"):
+        if normalized.endswith(suffix):
+            normalized = normalized[: -len(suffix)]
+
+    return AGENT_TYPE_ALIASES.get(normalized, normalized)
+
+
+def normalize_interaction_type(interaction_type: Optional[str]) -> str:
+    """Normalize caller interaction types to the Postgres enum values."""
+    if not interaction_type:
+        return "chat"
+    normalized = interaction_type.strip().lower().replace("-", "_").replace(" ", "_")
+    return INTERACTION_TYPE_ALIASES.get(normalized, normalized)
+
+
+def stable_user_uuid(user_id: str) -> uuid.UUID:
+    """Return a stable UUID for UUID and external string user IDs alike."""
+    try:
+        return uuid.UUID(str(user_id))
+    except (TypeError, ValueError):
+        return uuid.uuid5(uuid.NAMESPACE_URL, f"physics-assistant:user:{user_id}")
+
+
+def _external_username(user_id: str, resolved_user_id: uuid.UUID) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9_]+", "_", str(user_id).strip().lower()).strip("_")
+    slug = slug or "external"
+    return f"api_{slug[:72]}_{resolved_user_id.hex[:8]}"
 
 class DatabaseConfig:
     """Database configuration management"""
@@ -77,6 +172,21 @@ class PostgreSQLManager:
             return True
         except Exception as e:
             logger.error(f"❌ Failed to initialize PostgreSQL: {e}")
+            return False
+
+    async def ensure_schema(self) -> bool:
+        """Apply additive, idempotent schema objects needed at runtime."""
+        if not self.pool:
+            raise RuntimeError("PostgreSQL pool not initialized")
+
+        try:
+            schema_sql = SCHEMA_FILE.read_text(encoding="utf-8")
+            async with self.get_connection() as conn:
+                await conn.execute(schema_sql)
+            logger.info("✅ PostgreSQL schema verified")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Failed to verify PostgreSQL schema: {e}")
             return False
     
     async def close(self):
@@ -277,7 +387,13 @@ class DatabaseManager:
             return_exceptions=True
         )
         
-        success_count = sum(1 for result in results if result is True)
+        postgres_ready, neo4j_ready, redis_ready = results
+
+        if postgres_ready is True:
+            postgres_ready = await self.postgres.ensure_schema()
+
+        normalized_results = [postgres_ready, neo4j_ready, redis_ready]
+        success_count = sum(1 for result in normalized_results if result is True)
         
         if success_count == 3:
             self._initialized = True
@@ -332,29 +448,94 @@ class DatabaseManager:
     
     # Convenience methods for common operations
     
-    async def log_interaction(self, user_id: str, agent_type: str, message: str, 
-                            response: str, session_id: str = None, metadata: dict = None) -> str:
+    async def _ensure_user(self, conn, user_id: str) -> uuid.UUID:
+        """Create a stable synthetic user row for external UI/agent IDs."""
+        resolved_user_id = stable_user_uuid(user_id)
+        username = _external_username(user_id, resolved_user_id)
+        email = f"{username}@physics-assistant.local"
+
+        await conn.execute(
+            """
+            INSERT INTO users (id, email, username, password_hash, is_verified, metadata)
+            VALUES ($1, $2, $3, $4, TRUE, $5::jsonb)
+            ON CONFLICT (id) DO NOTHING
+            """,
+            resolved_user_id,
+            email,
+            username,
+            "external-user",
+            json.dumps({"external_user_id": str(user_id)}),
+        )
+
+        return resolved_user_id
+
+    async def _resolve_session_id(self, conn, session_id: Optional[str], user_id: uuid.UUID) -> Optional[uuid.UUID]:
+        if not session_id:
+            return None
+
+        try:
+            resolved_session_id = uuid.UUID(str(session_id))
+        except (TypeError, ValueError):
+            return None
+
+        session_exists = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM user_sessions WHERE id = $1 AND user_id = $2)",
+            resolved_session_id,
+            user_id,
+        )
+        return resolved_session_id if session_exists else None
+
+    async def log_interaction(
+        self,
+        user_id: str,
+        agent_type: str,
+        message: str = "",
+        response: str = "",
+        session_id: str = None,
+        metadata: dict = None,
+        interaction_type: str = "chat",
+        execution_time_ms: Optional[int] = None,
+        success: bool = True,
+        error_message: Optional[str] = None,
+        request_data: Optional[dict] = None,
+        response_data: Optional[dict] = None,
+    ) -> str:
         """Log user interaction to PostgreSQL"""
+        normalized_agent_type = normalize_agent_type(agent_type)
+        normalized_interaction_type = normalize_interaction_type(interaction_type)
+
+        if normalized_agent_type not in CANONICAL_AGENT_TYPES:
+            raise ValueError(f"Unsupported agent_type: {agent_type}")
+
         query = """
-        INSERT INTO interactions (user_id, session_id, type, agent_type, request_data, response_data, success, metadata, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        INSERT INTO interactions (
+            user_id, session_id, type, agent_type, request_data, response_data,
+            execution_time_ms, success, error_message, metadata, created_at
+        )
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10::jsonb, $11)
         RETURNING id
         """
-        
-        request_data = {'message': message}
-        response_data = {'response': response}
+
+        request_payload = request_data or {'message': message}
+        response_payload = response_data or {'response': response}
+        metadata_payload = metadata or {}
         
         async with self.postgres.get_connection() as conn:
+            resolved_user_id = await self._ensure_user(conn, user_id)
+            resolved_session_id = await self._resolve_session_id(conn, session_id, resolved_user_id)
+
             interaction_id = await conn.fetchval(
                 query, 
-                user_id,
-                session_id,
-                'chat',  # type
-                agent_type,  # agent_type
-                json.dumps(request_data),  # request_data
-                json.dumps(response_data),  # response_data
-                True,  # success
-                json.dumps(metadata or {}),  # metadata
+                resolved_user_id,
+                resolved_session_id,
+                normalized_interaction_type,
+                normalized_agent_type,
+                json.dumps(request_payload),
+                json.dumps(response_payload),
+                execution_time_ms,
+                success,
+                error_message,
+                json.dumps(metadata_payload),
                 datetime.now()  # created_at
             )
             return str(interaction_id)

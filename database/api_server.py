@@ -18,7 +18,12 @@ import uvicorn
 from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST, start_http_server
 import time
 
-from db_manager import DatabaseManager, get_db_manager
+from db_manager import (
+    CANONICAL_AGENT_TYPES,
+    DatabaseManager,
+    get_db_manager,
+    normalize_agent_type,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -133,6 +138,26 @@ class InteractionResponse(BaseModel):
     timestamp: datetime
     status: str = "success"
 
+class InteractionLogRequest(BaseModel):
+    """Flexible interaction logging contract for Strands and legacy callers"""
+    user_id: str = Field(..., description="Incoming user identifier")
+    session_id: Optional[str] = Field(None, description="Optional session identifier")
+    agent_type: Optional[str] = Field(None, description="Physics agent type")
+    agent_id: Optional[str] = Field(None, description="Strands/UI agent identifier")
+    interaction_type: str = Field(default="agent_call", description="Interaction type")
+    message: Optional[str] = Field(None, description="User message")
+    response: Optional[str] = Field(None, description="Agent response")
+    problem: Optional[str] = Field(None, description="Physics problem text")
+    solution: Optional[str] = Field(None, description="Agent solution text")
+    request_data: Optional[Dict[str, Any]] = Field(None, description="Structured request payload")
+    response_data: Optional[Dict[str, Any]] = Field(None, description="Structured response payload")
+    tools_used: Optional[List[str]] = Field(None, description="Tools used by the agent")
+    execution_time_ms: Optional[int] = Field(None, description="Execution time in milliseconds")
+    success: bool = Field(default=True, description="Whether the interaction succeeded")
+    error_message: Optional[str] = Field(None, description="Error message for failed interactions")
+    framework: Optional[str] = Field(None, description="Caller framework, such as strands")
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional metadata")
+
 class SessionRequest(BaseModel):
     """Request model for creating sessions"""
     user_id: str = Field(..., description="User identifier")
@@ -157,6 +182,16 @@ class ConceptQuery(BaseModel):
     """Query for physics concepts"""
     category: Optional[str] = None
     search_term: Optional[str] = None
+
+class KnowledgeTransferAttemptRequest(BaseModel):
+    """Request model for HITL answer attempts"""
+    user_id: str = Field(..., description="Incoming user identifier")
+    question_id: str = Field(..., description="HITL question UUID")
+    session_id: Optional[str] = Field(None, description="Optional UI session identifier")
+    agent_type: Optional[str] = Field(None, description="Agent type override")
+    selected_choice_id: Optional[str] = Field(None, description="Selected multiple choice option id")
+    answer_text: Optional[str] = Field(None, description="Free-form answer text")
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional attempt metadata")
 
 # Analytics-specific models
 class StudentProgressRequest(BaseModel):
@@ -272,6 +307,78 @@ async def get_db() -> DatabaseManager:
         raise HTTPException(status_code=503, detail="Database not available")
     return db_manager
 
+
+def _decode_jsonb(value: Any, default: Any = None) -> Any:
+    """Decode asyncpg JSONB strings while accepting already-decoded values."""
+    if value is None:
+        return default
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return default
+    return value
+
+
+def _require_agent_type(agent_type: Optional[str]) -> str:
+    normalized = normalize_agent_type(agent_type)
+    if normalized not in CANONICAL_AGENT_TYPES:
+        raise HTTPException(status_code=400, detail=f"Unsupported agent_type: {agent_type}")
+    return normalized
+
+
+def _normalize_answer(answer: Optional[str]) -> str:
+    return " ".join((answer or "").strip().lower().split())
+
+
+def _row_value(row: Any, key: str, default: Any = None) -> Any:
+    try:
+        return row[key]
+    except (KeyError, TypeError):
+        return default
+
+
+def _serialize_hitl_question(row: Any, include_answer: bool = False) -> Dict[str, Any]:
+    choices = _decode_jsonb(_row_value(row, "choices"), [])
+    metadata = _decode_jsonb(_row_value(row, "metadata"), {})
+
+    question = {
+        "id": str(_row_value(row, "id")),
+        "question_key": _row_value(row, "question_key"),
+        "agent_type": _row_value(row, "agent_type"),
+        "topic": _row_value(row, "topic"),
+        "leg": _row_value(row, "leg"),
+        "question_type": _row_value(row, "question_type"),
+        "question_text": _row_value(row, "question_text"),
+        "choices": choices,
+        "metadata": metadata,
+    }
+
+    if include_answer:
+        question.update({
+            "correct_choice_id": _row_value(row, "correct_choice_id"),
+            "correct_answer": _row_value(row, "correct_answer"),
+            "explanation": _row_value(row, "explanation"),
+        })
+
+    return question
+
+
+def _score_hitl_attempt(question: Dict[str, Any], selected_choice_id: Optional[str], answer_text: Optional[str]) -> bool:
+    correct_choice_id = question.get("correct_choice_id")
+    if selected_choice_id and correct_choice_id:
+        return selected_choice_id == correct_choice_id
+
+    normalized_answer = _normalize_answer(answer_text)
+    if normalized_answer and _normalize_answer(question.get("correct_answer")) == normalized_answer:
+        return True
+
+    for choice in question.get("choices", []):
+        if choice.get("id") == correct_choice_id:
+            return normalized_answer == _normalize_answer(choice.get("text"))
+
+    return False
+
 # Health check endpoints
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
@@ -337,38 +444,36 @@ async def log_interaction(
 ):
     """Log a student interaction with physics agents"""
     try:
-        # Validate user exists (optional - could be removed for performance)
-        async with db.postgres.get_connection() as conn:
-            user_exists = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)", interaction.user_id)
-            if not user_exists:
-                raise HTTPException(status_code=404, detail="User not found")
+        normalized_agent_type = _require_agent_type(interaction.agent_type)
         
         # Log the interaction
         interaction_id = await db.log_interaction(
             user_id=interaction.user_id,
-            agent_type=interaction.agent_type,
+            agent_type=normalized_agent_type,
             message=interaction.message,
             response=interaction.response,
             session_id=interaction.session_id,
-            metadata=interaction.metadata
+            metadata=interaction.metadata,
+            interaction_type=interaction.interaction_type,
+            execution_time_ms=interaction.execution_time_ms,
         )
         
         # Record metrics for monitoring
         INTERACTION_COUNT.labels(
-            agent_type=interaction.agent_type, 
+            agent_type=normalized_agent_type,
             success="true"
         ).inc()
         
         if interaction.execution_time_ms:
             execution_seconds = interaction.execution_time_ms / 1000
-            AGENT_EXECUTION_TIME.labels(agent_type=interaction.agent_type).observe(execution_seconds)
+            AGENT_EXECUTION_TIME.labels(agent_type=normalized_agent_type).observe(execution_seconds)
         
         # Submit real-time analytics event
         if realtime_engine:
             background_tasks.add_task(
                 submit_realtime_event,
                 interaction.user_id,
-                interaction.agent_type,
+                normalized_agent_type,
                 True,  # success
                 interaction.execution_time_ms
             )
@@ -378,7 +483,7 @@ async def log_interaction(
             background_tasks.add_task(
                 cache_agent_stats, 
                 db, 
-                interaction.agent_type
+                normalized_agent_type
             )
         
         return InteractionResponse(
@@ -390,17 +495,102 @@ async def log_interaction(
     except HTTPException:
         # Record failed interaction metric
         INTERACTION_COUNT.labels(
-            agent_type=interaction.agent_type, 
+            agent_type=normalize_agent_type(interaction.agent_type) or interaction.agent_type,
             success="false"
         ).inc()
         raise
+    except ValueError as e:
+        INTERACTION_COUNT.labels(
+            agent_type=normalize_agent_type(interaction.agent_type) or interaction.agent_type,
+            success="false"
+        ).inc()
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         # Record failed interaction metric
         INTERACTION_COUNT.labels(
-            agent_type=interaction.agent_type, 
+            agent_type=normalize_agent_type(interaction.agent_type) or interaction.agent_type,
             success="false"
         ).inc()
         logger.error(f"Failed to log interaction: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to log interaction: {str(e)}")
+
+@app.post("/interactions/log", response_model=InteractionResponse, tags=["Interactions"])
+async def log_interaction_contract(
+    interaction: InteractionLogRequest,
+    background_tasks: BackgroundTasks,
+    db: DatabaseManager = Depends(get_db)
+):
+    """Log Strands and UI interactions using the database API contract."""
+    raw_agent_type = interaction.agent_type or interaction.agent_id
+    normalized_agent_type = _require_agent_type(raw_agent_type)
+
+    message = interaction.message if interaction.message is not None else (interaction.problem or "")
+    response = interaction.response if interaction.response is not None else (interaction.solution or "")
+
+    request_data = interaction.request_data or {
+        "message": message,
+        "problem": interaction.problem or message,
+    }
+    response_data = interaction.response_data or {
+        "response": response,
+        "solution": interaction.solution or response,
+    }
+
+    metadata = {
+        **(interaction.metadata or {}),
+        "original_agent_type": raw_agent_type,
+    }
+    if interaction.tools_used is not None:
+        metadata["tools_used"] = interaction.tools_used
+    if interaction.framework:
+        metadata["framework"] = interaction.framework
+
+    try:
+        interaction_id = await db.log_interaction(
+            user_id=interaction.user_id,
+            agent_type=normalized_agent_type,
+            message=message,
+            response=response,
+            session_id=interaction.session_id,
+            metadata=metadata,
+            interaction_type=interaction.interaction_type,
+            execution_time_ms=interaction.execution_time_ms,
+            success=interaction.success,
+            error_message=interaction.error_message,
+            request_data=request_data,
+            response_data=response_data,
+        )
+
+        INTERACTION_COUNT.labels(
+            agent_type=normalized_agent_type,
+            success=str(interaction.success).lower()
+        ).inc()
+
+        if interaction.execution_time_ms:
+            AGENT_EXECUTION_TIME.labels(agent_type=normalized_agent_type).observe(
+                interaction.execution_time_ms / 1000
+            )
+
+        if realtime_engine:
+            background_tasks.add_task(
+                submit_realtime_event,
+                interaction.user_id,
+                normalized_agent_type,
+                interaction.success,
+                interaction.execution_time_ms
+            )
+
+        return InteractionResponse(
+            interaction_id=interaction_id,
+            timestamp=datetime.now(),
+            status="success" if interaction.success else "error"
+        )
+    except ValueError as e:
+        INTERACTION_COUNT.labels(agent_type=normalized_agent_type, success="false").inc()
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        INTERACTION_COUNT.labels(agent_type=normalized_agent_type, success="false").inc()
+        logger.error(f"Failed to log interaction via /interactions/log: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to log interaction: {str(e)}")
 
 @app.get("/interactions", tags=["Interactions"])
@@ -429,9 +619,10 @@ async def get_interactions(
             params.append(user_id)
             
         if agent_type:
+            normalized_filter_agent_type = _require_agent_type(agent_type)
             param_count += 1
             query += f" AND agent_type = ${param_count}"  
-            params.append(agent_type)
+            params.append(normalized_filter_agent_type)
         
         param_count += 1
         query += f" ORDER BY created_at DESC LIMIT ${param_count}"
@@ -471,6 +662,236 @@ async def get_interactions(
         
     except Exception as e:
         logger.error(f"Failed to retrieve interactions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Knowledge transfer / HITL endpoints
+
+@app.get("/knowledge-transfer/questions/pick", tags=["Knowledge Transfer"])
+async def pick_knowledge_transfer_question(
+    agent_type: Optional[str] = None,
+    topic: Optional[str] = None,
+    leg: int = 1,
+    db: DatabaseManager = Depends(get_db)
+):
+    """Pick the next active HITL diagnostic question for an agent."""
+    if leg < 1:
+        raise HTTPException(status_code=400, detail="leg must be >= 1")
+
+    query = """
+    SELECT id, question_key, agent_type, topic, leg, question_type, question_text,
+           choices, correct_choice_id, correct_answer, explanation, metadata
+    FROM hitl_questions
+    WHERE is_active = TRUE AND leg = $1
+    """
+    params: List[Any] = [leg]
+    param_count = 1
+
+    if agent_type:
+        normalized_agent_type = _require_agent_type(agent_type)
+        param_count += 1
+        query += f" AND agent_type = ${param_count}"
+        params.append(normalized_agent_type)
+
+    if topic:
+        param_count += 1
+        query += f" AND topic = ${param_count}"
+        params.append(topic)
+
+    query += " ORDER BY created_at ASC, question_key ASC LIMIT 1"
+
+    try:
+        async with db.postgres.get_connection() as conn:
+            row = await conn.fetchrow(query, *params)
+
+        if not row:
+            raise HTTPException(status_code=404, detail="No HITL question found")
+
+        return {
+            "status": "found",
+            "question": _serialize_hitl_question(row),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to pick HITL question: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/knowledge-transfer/attempts", tags=["Knowledge Transfer"])
+async def submit_knowledge_transfer_attempt(
+    attempt: KnowledgeTransferAttemptRequest,
+    db: DatabaseManager = Depends(get_db)
+):
+    """Score and record a HITL diagnostic question attempt."""
+    if not attempt.selected_choice_id and not attempt.answer_text:
+        raise HTTPException(status_code=400, detail="selected_choice_id or answer_text is required")
+
+    try:
+        question_uuid = uuid.UUID(attempt.question_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="question_id must be a UUID")
+
+    try:
+        async with db.postgres.get_connection() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, question_key, agent_type, topic, leg, question_type,
+                       question_text, choices, correct_choice_id, correct_answer,
+                       explanation, metadata
+                FROM hitl_questions
+                WHERE id = $1 AND is_active = TRUE
+                """,
+                question_uuid,
+            )
+
+            if not row:
+                raise HTTPException(status_code=404, detail="HITL question not found")
+
+            question = _serialize_hitl_question(row, include_answer=True)
+            question_agent_type = _require_agent_type(question["agent_type"])
+            normalized_agent_type = _require_agent_type(attempt.agent_type or question_agent_type)
+            if normalized_agent_type != question_agent_type:
+                raise HTTPException(status_code=400, detail="agent_type does not match question")
+
+            is_correct = _score_hitl_attempt(
+                question,
+                attempt.selected_choice_id,
+                attempt.answer_text,
+            )
+
+            feedback = (
+                "Correct. You can proceed."
+                if is_correct
+                else question.get("explanation") or "Not quite. Try the follow-up question."
+            )
+
+            attempt_id = await conn.fetchval(
+                """
+                INSERT INTO hitl_attempts (
+                    question_id, user_id, session_id, agent_type, selected_choice_id,
+                    answer_text, is_correct, feedback, metadata, created_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)
+                RETURNING id
+                """,
+                question_uuid,
+                attempt.user_id,
+                attempt.session_id,
+                normalized_agent_type,
+                attempt.selected_choice_id,
+                attempt.answer_text,
+                is_correct,
+                feedback,
+                json.dumps(attempt.metadata or {}),
+                datetime.now(),
+            )
+
+            next_question = None
+            if not is_correct:
+                next_leg = int((question.get("metadata") or {}).get("next_leg_on_wrong", question["leg"] + 1))
+                next_row = await conn.fetchrow(
+                    """
+                    SELECT id, question_key, agent_type, topic, leg, question_type,
+                           question_text, choices, correct_choice_id, correct_answer,
+                           explanation, metadata
+                    FROM hitl_questions
+                    WHERE is_active = TRUE
+                      AND agent_type = $1
+                      AND leg = $2
+                    ORDER BY created_at ASC, question_key ASC
+                    LIMIT 1
+                    """,
+                    normalized_agent_type,
+                    next_leg,
+                )
+                if next_row:
+                    next_question = _serialize_hitl_question(next_row)
+
+        return {
+            "status": "recorded",
+            "attempt_id": str(attempt_id),
+            "question_id": str(question_uuid),
+            "agent_type": normalized_agent_type,
+            "is_correct": is_correct,
+            "proceed": is_correct,
+            "feedback": feedback,
+            "next_question": next_question,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to submit HITL attempt: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/knowledge-transfer/attempts/aggregate", tags=["Knowledge Transfer"])
+async def aggregate_knowledge_transfer_attempts(
+    user_id: Optional[str] = None,
+    agent_type: Optional[str] = None,
+    db: DatabaseManager = Depends(get_db)
+):
+    """Aggregate HITL attempt outcomes, optionally filtered by user or agent."""
+    query = """
+    SELECT agent_type,
+           COUNT(*) AS total_attempts,
+           COUNT(*) FILTER (WHERE is_correct) AS correct_attempts,
+           COUNT(*) FILTER (WHERE NOT is_correct) AS incorrect_attempts
+    FROM hitl_attempts
+    WHERE 1=1
+    """
+    params: List[Any] = []
+    param_count = 0
+
+    if user_id:
+        param_count += 1
+        query += f" AND user_id = ${param_count}"
+        params.append(user_id)
+
+    if agent_type:
+        normalized_agent_type = _require_agent_type(agent_type)
+        param_count += 1
+        query += f" AND agent_type = ${param_count}"
+        params.append(normalized_agent_type)
+
+    query += " GROUP BY agent_type ORDER BY agent_type"
+
+    try:
+        async with db.postgres.get_connection() as conn:
+            rows = await conn.fetch(query, *params)
+
+        by_agent = []
+        total_attempts = 0
+        correct_attempts = 0
+        incorrect_attempts = 0
+
+        for row in rows:
+            row_total = int(_row_value(row, "total_attempts", 0))
+            row_correct = int(_row_value(row, "correct_attempts", 0))
+            row_incorrect = int(_row_value(row, "incorrect_attempts", 0))
+
+            total_attempts += row_total
+            correct_attempts += row_correct
+            incorrect_attempts += row_incorrect
+
+            by_agent.append({
+                "agent_type": _row_value(row, "agent_type"),
+                "total_attempts": row_total,
+                "correct_attempts": row_correct,
+                "incorrect_attempts": row_incorrect,
+                "accuracy": row_correct / row_total if row_total else 0.0,
+            })
+
+        return {
+            "total_attempts": total_attempts,
+            "correct_attempts": correct_attempts,
+            "incorrect_attempts": incorrect_attempts,
+            "accuracy": correct_attempts / total_attempts if total_attempts else 0.0,
+            "by_agent": by_agent,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to aggregate HITL attempts: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Analytics endpoints

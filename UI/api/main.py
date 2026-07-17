@@ -5,6 +5,7 @@ All physics agents now use Strands SDK with MCP tools and Ollama LLM
 
 import asyncio
 import logging
+import re
 from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, Depends
@@ -239,6 +240,84 @@ def _format_graph_value(value: Any, unit: str = "") -> str:
         formatted = str(value)
 
     return f"{formatted} {unit}".strip()
+
+
+def _extract_number(patterns: list[str], text: str) -> Optional[float]:
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return float(match.group(1))
+    return None
+
+
+def _extract_displacement(patterns: list[str], text: str) -> Optional[float]:
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+
+        value = float(match.group(1))
+        unit = (match.group(2) or "m").lower()
+        if unit == "cm":
+            return value / 100
+        if unit == "mm":
+            return value / 1000
+        return value
+
+    return None
+
+
+def _build_forces_spring_fallback_solution(problem: str) -> Optional[Dict[str, Any]]:
+    """Create a deterministic Hooke's-law answer for simple spring-force prompts."""
+    normalized = problem.lower()
+    if not any(cue in normalized for cue in ("spring", "hooke")):
+        return None
+    if "energy" in normalized and "force" not in normalized:
+        return None
+
+    spring_constant = _extract_number(
+        [
+            r"\bk\s*(?:=|is|of)?\s*([-+]?\d+(?:\.\d+)?)\s*(?:n\s*/\s*m|newtons?\s+per\s+meter)?",
+            r"\bspring\s+constant\s*(?:=|is|of)?\s*([-+]?\d+(?:\.\d+)?)\s*(?:n\s*/\s*m|newtons?\s+per\s+meter)?",
+            r"([-+]?\d+(?:\.\d+)?)\s*n\s*/\s*m",
+        ],
+        problem,
+    )
+    displacement = _extract_displacement(
+        [
+            r"\b(?:compressed|compression|stretched|stretch|stretches|displacement|x)\s*(?:by|=|of|is)?\s*([-+]?\d+(?:\.\d+)?)\s*(m|cm|mm)?\b",
+            r"\b([-+]?\d+(?:\.\d+)?)\s*(m|cm|mm)\b",
+        ],
+        problem,
+    )
+
+    if spring_constant is None or displacement is None:
+        return None
+
+    force_magnitude = abs(spring_constant * displacement)
+    spring_constant_text = _format_graph_value(spring_constant, "N/m")
+    displacement_text = _format_graph_value(abs(displacement), "m")
+    force_text = _format_graph_value(force_magnitude, "N")
+    deformation_label = "compression" if "compress" in normalized else "stretch/displacement"
+
+    return {
+        "solution": (
+            "**Solution**\n\n"
+            f"Known values: spring constant k = {spring_constant_text}, {deformation_label} x = {displacement_text}.\n\n"
+            "Use Hooke's law for the magnitude of the spring force:\n\n"
+            "- F_s = k*x\n\n"
+            f"Substitute: F_s = ({spring_constant_text})({displacement_text}) = {force_text}.\n\n"
+            f"Final answer: the spring-force magnitude is {force_text}. "
+            "The restoring force points opposite the compression or stretch."
+        ),
+        "metadata": {
+            "parsed_inputs": {
+                "spring_constant": spring_constant,
+                "displacement": abs(displacement),
+                "force_magnitude": force_magnitude,
+            },
+        },
+    }
 
 
 def _parameter_map(payload: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -504,6 +583,22 @@ async def solve_problem(
                         "graph_warnings": graph_result["warnings"],
                         "graph_errors": graph_result["errors"],
                         "graph_inputs": graph_result["parsed_inputs"],
+                        "guided_tutoring": agent_context["guided_tutoring"],
+                    },
+                )
+
+        if agent_id == "forces_agent":
+            spring_fallback = _build_forces_spring_fallback_solution(solver_problem)
+            if spring_fallback:
+                return ProblemSolveResponse(
+                    success=True,
+                    agent_id=agent_id,
+                    problem=request.problem,
+                    solution=spring_fallback["solution"],
+                    reasoning="Used deterministic Hooke's-law fallback for a simple spring-force calculation.",
+                    tools_used=["hookes_law_fallback"],
+                    metadata={
+                        **spring_fallback["metadata"],
                         "guided_tutoring": agent_context["guided_tutoring"],
                     },
                 )

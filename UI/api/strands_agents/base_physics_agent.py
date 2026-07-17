@@ -310,14 +310,25 @@ class StrandsPhysicsAgent(ABC):
             self.db_client['session'].post(
                 f"{self.db_client['base_url']}/interactions/log",
                 json={
-                    "agent_id": self.agent_id,
                     "user_id": user_id,
                     "session_id": session_id,
-                    "problem": problem,
-                    "solution": solution,
-                    "tools_used": tools_used,
+                    "agent_type": self.agent_id,
+                    "interaction_type": "agent_call",
+                    "message": problem,
+                    "response": solution,
+                    "request_data": {
+                        "problem": problem,
+                    },
+                    "response_data": {
+                        "solution": solution,
+                        "tools_used": tools_used,
+                    },
                     "execution_time_ms": execution_time_ms,
-                    "framework": "strands"
+                    "success": True,
+                    "framework": "strands",
+                    "metadata": {
+                        "tools_used": tools_used,
+                    }
                 },
                 timeout=5
             )

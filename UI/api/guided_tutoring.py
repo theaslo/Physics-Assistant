@@ -719,6 +719,21 @@ def evaluate_guided_tutoring(
         "topic_classification": classification,
     }
 
+    tutoring_context = (context or {}).get("guided_tutoring") or {}
+    if isinstance(tutoring_context, dict) and tutoring_context.get("full_solution_allowed"):
+        return GuidedTutoringDecision(
+            intercept=False,
+            response=None,
+            allow_full_solution=True,
+            stage="hitl_checkpoint_approved",
+            metadata={
+                **base_metadata,
+                "reason": tutoring_context.get("reason", "hitl_checkpoint_correct"),
+                "hitl_results": tutoring_context.get("hitl_results", []),
+                "checkpoint_question_ids": tutoring_context.get("checkpoint_question_ids", []),
+            },
+        )
+
     if needs_worked_example:
         return GuidedTutoringDecision(
             intercept=False,
