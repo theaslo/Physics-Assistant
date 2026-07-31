@@ -409,7 +409,7 @@ INSERT INTO hitl_questions (
     'dx_time',
     'dx = v0*t + 1/2*a*t^2',
     'Use the displacement-time equation because time, initial velocity, and acceleration are the known setup quantities.',
-    '{"next_leg_on_wrong": 2}'::jsonb
+    '{"next_leg_on_wrong": 2, "max_attempts": 2}'::jsonb
 ),
 (
     'kinematics_constant_acceleration_leg_2',
@@ -424,7 +424,7 @@ INSERT INTO hitl_questions (
     'knowns_signs',
     'Known v0, a, t, and the sign convention',
     'The equation only works after the kinematic knowns and direction convention are defined.',
-    '{}'::jsonb
+    '{"max_attempts": 2}'::jsonb
 ),
 (
     'forces_free_body_leg_1',
@@ -439,7 +439,7 @@ INSERT INTO hitl_questions (
     'free_body_axes',
     'Draw a free-body diagram and choose useful axes',
     'Forces problems start by isolating the object, drawing forces, and choosing axes before applying Newtons second law.',
-    '{"next_leg_on_wrong": 2}'::jsonb
+    '{"next_leg_on_wrong": 2, "max_attempts": 2}'::jsonb
 ),
 (
     'forces_newton_second_leg_2',
@@ -454,7 +454,7 @@ INSERT INTO hitl_questions (
     'sum_fx',
     'sum F_x = m*a_x',
     'After the free-body diagram, write the net force along each axis as mass times acceleration along that axis.',
-    '{}'::jsonb
+    '{"max_attempts": 2}'::jsonb
 )
 ON CONFLICT (question_key) DO UPDATE SET
     agent_type = EXCLUDED.agent_type,

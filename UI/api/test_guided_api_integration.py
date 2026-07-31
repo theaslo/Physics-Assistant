@@ -139,6 +139,31 @@ class GuidedTutoringApiIntegrationTests(unittest.TestCase):
         self.assertIn("Total distance = 20 m", body["solution"])
         self.assertEqual(body["tools_used"], ["kinematics_graph_builder"])
 
+    def test_simple_forces_acceleration_uses_deterministic_fallback(self):
+        response = self.client.post(
+            "/agent/forces_agent/solve",
+            json={
+                "problem": (
+                    "A 5 kg box is pulled with a 20 N force on a frictionless surface. "
+                    "Find the acceleration."
+                ),
+                "user_id": "integration_test",
+                "context": {
+                    "guided_tutoring": {
+                        "full_solution_allowed": True,
+                        "reason": "hitl_checkpoint_correct",
+                    },
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertTrue(body["success"], body)
+        self.assertIsNone(body["error"])
+        self.assertIn("a = (20 N) / (5 kg) = 4 m/s^2", body["solution"])
+        self.assertEqual(body["tools_used"], ["newtons_second_law_fallback"])
+
 
 if __name__ == "__main__":
     unittest.main()

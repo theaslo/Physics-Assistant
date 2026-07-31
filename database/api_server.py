@@ -379,6 +379,22 @@ def _score_hitl_attempt(question: Dict[str, Any], selected_choice_id: Optional[s
 
     return False
 
+
+def _safe_positive_int(value: Any, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _correct_answer_feedback(question: Dict[str, Any]) -> str:
+    correct_choice_id = question.get("correct_choice_id")
+    for choice in question.get("choices", []):
+        if choice.get("id") == correct_choice_id and choice.get("text"):
+            return str(choice["text"])
+    return str(question.get("correct_answer") or correct_choice_id or "the guided setup")
+
 # Health check endpoints
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
@@ -759,6 +775,22 @@ async def submit_knowledge_transfer_attempt(
                 attempt.answer_text,
             )
 
+            question_metadata = question.get("metadata") or {}
+            max_attempts = _safe_positive_int(question_metadata.get("max_attempts"), 2)
+            previous_attempts = await conn.fetchval(
+                """
+                SELECT COUNT(*)
+                FROM hitl_attempts
+                WHERE question_id = $1
+                  AND user_id = $2
+                  AND ($3::varchar IS NULL OR session_id = $3)
+                """,
+                question_uuid,
+                attempt.user_id,
+                attempt.session_id,
+            )
+            attempt_count = int(previous_attempts or 0) + 1
+
             feedback = (
                 "Correct. You can proceed."
                 if is_correct
@@ -787,8 +819,11 @@ async def submit_knowledge_transfer_attempt(
             )
 
             next_question = None
+            proceed = is_correct
+            can_retry = False
+            max_attempts_reached = False
             if not is_correct:
-                next_leg = int((question.get("metadata") or {}).get("next_leg_on_wrong", question["leg"] + 1))
+                next_leg = int(question_metadata.get("next_leg_on_wrong", question["leg"] + 1))
                 next_row = await conn.fetchrow(
                     """
                     SELECT id, question_key, agent_type, topic, leg, question_type,
@@ -806,6 +841,18 @@ async def submit_knowledge_transfer_attempt(
                 )
                 if next_row:
                     next_question = _serialize_hitl_question(next_row)
+                elif attempt_count >= max_attempts:
+                    proceed = True
+                    max_attempts_reached = True
+                    feedback = (
+                        "Not quite. The correct choice is "
+                        f"{_correct_answer_feedback(question)}. We will continue with guided help."
+                    )
+                else:
+                    can_retry = True
+                    feedback = (
+                        f"{feedback} Try once more before we continue with guided help."
+                    )
 
         return {
             "status": "recorded",
@@ -813,7 +860,11 @@ async def submit_knowledge_transfer_attempt(
             "question_id": str(question_uuid),
             "agent_type": normalized_agent_type,
             "is_correct": is_correct,
-            "proceed": is_correct,
+            "proceed": proceed,
+            "can_retry": can_retry,
+            "attempt_count": attempt_count,
+            "max_attempts": max_attempts,
+            "max_attempts_reached": max_attempts_reached,
             "feedback": feedback,
             "next_question": next_question,
         }

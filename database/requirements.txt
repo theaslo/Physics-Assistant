@@ -43,6 +43,7 @@ python-docx>=0.8.11
 # Note: For spaCy, install model with: python -m spacy download en_core_web_sm
 
 # Testing and development
+httpx>=0.24,<0.28
 pytest==7.4.3
 pytest-asyncio==0.21.1
 pytest-mock==3.12.0

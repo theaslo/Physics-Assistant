@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Alert,
   Box,
@@ -15,6 +15,7 @@ import {
 } from '@mui/material'
 import {
   CheckCircle as CheckCircleIcon,
+  ArrowForward as ArrowForwardIcon,
   Quiz as QuizIcon,
 } from '@mui/icons-material'
 
@@ -25,91 +26,75 @@ export interface HitlChoice {
 
 export interface HitlQuestion {
   id: string
-  title: string
+  title?: string
   prompt: string
   choices: HitlChoice[]
-  correctChoiceId: string
-  feedback: string
+  leg?: number
+  correctChoiceId?: string
+  feedback?: string
 }
 
 export interface HitlResult {
   questionId: string
   selectedChoiceId: string
-  correctChoiceId: string
+  isCorrect: boolean
+  attemptId?: string
+  maxAttemptsReached?: boolean
 }
+
+export type HitlDialogState =
+  | 'loading_question'
+  | 'awaiting_answer'
+  | 'submitting_answer'
+  | 'showing_feedback'
+  | 'completed'
+  | 'error'
 
 interface HumanInTheLoopDialogProps {
   open: boolean
   agentName: string
-  questions: HitlQuestion[]
-  onCancel: () => void
-  onComplete: (results: HitlResult[]) => void
+  question: HitlQuestion | null
+  state: HitlDialogState
+  feedback: string | null
+  feedbackSeverity: 'success' | 'warning' | 'error'
+  error: string | null
+  onSubmit: (selectedChoiceId: string) => void
+  onRetry: () => void
+  onContinue: () => void
 }
 
 export default function HumanInTheLoopDialog({
   open,
   agentName,
-  questions,
-  onCancel,
-  onComplete,
+  question,
+  state,
+  feedback,
+  feedbackSeverity,
+  error,
+  onSubmit,
+  onRetry,
+  onContinue,
 }: HumanInTheLoopDialogProps) {
-  const [questionIndex, setQuestionIndex] = useState(0)
   const [selectedChoiceId, setSelectedChoiceId] = useState('')
-  const [feedback, setFeedback] = useState<string | null>(null)
-  const [results, setResults] = useState<HitlResult[]>([])
 
-  const question = questions[questionIndex]
-  const progress = questions.length > 0 ? ((questionIndex + 1) / questions.length) * 100 : 0
+  const isLoading = state === 'loading_question'
+  const isSubmitting = state === 'submitting_answer'
+  const isBusy = isLoading || isSubmitting || state === 'showing_feedback' || state === 'completed'
+  const canSubmit = Boolean(question && selectedChoiceId && !isBusy)
 
-  const resetDialog = () => {
-    setQuestionIndex(0)
+  useEffect(() => {
     setSelectedChoiceId('')
-    setFeedback(null)
-    setResults([])
-  }
-
-  const handleCancel = () => {
-    resetDialog()
-    onCancel()
-  }
+  }, [question?.id, open])
 
   const handleSubmit = () => {
     if (!question || !selectedChoiceId) return
-
-    const isCorrect = selectedChoiceId === question.correctChoiceId
-    const nextResults = [
-      ...results,
-      {
-        questionId: question.id,
-        selectedChoiceId,
-        correctChoiceId: question.correctChoiceId,
-      },
-    ]
-
-    if (isCorrect) {
-      resetDialog()
-      onComplete(nextResults)
-      return
-    }
-
-    setResults(nextResults)
-    setFeedback(question.feedback)
-    setSelectedChoiceId('')
-
-    if (questionIndex < questions.length - 1) {
-      window.setTimeout(() => {
-        setQuestionIndex((current) => current + 1)
-        setFeedback(null)
-      }, 700)
-    }
+    onSubmit(selectedChoiceId)
   }
-
-  if (!question) return null
 
   return (
     <Dialog
       open={open}
-      onClose={handleCancel}
+      disableEscapeKeyDown
       fullWidth
       maxWidth="sm"
       PaperProps={{
@@ -122,64 +107,93 @@ export default function HumanInTheLoopDialog({
         <QuizIcon color="primary" />
         <Box>
           <Typography variant="h6" component="div">
-            {question.title}
+            {question?.title || 'Reasoning Check'}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            {agentName}
+            {question?.leg ? `${agentName} · Step ${question.leg}` : agentName}
           </Typography>
         </Box>
       </DialogTitle>
 
-      <LinearProgress variant="determinate" value={progress} />
+      {(isLoading || isSubmitting) && <LinearProgress />}
 
       <DialogContent sx={{ pt: 3 }}>
-        <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 2 }}>
-          {question.prompt}
-        </Typography>
+        {isLoading && (
+          <Typography variant="body2" color="text.secondary">
+            Loading the next checkpoint...
+          </Typography>
+        )}
 
-        <RadioGroup
-          value={selectedChoiceId}
-          onChange={(event) => setSelectedChoiceId(event.target.value)}
-          sx={{ gap: 1 }}
-        >
-          {question.choices.map((choice) => (
-            <FormControlLabel
-              key={choice.id}
-              value={choice.id}
-              control={<Radio />}
-              label={choice.text}
-              sx={{
-                m: 0,
-                px: 1.5,
-                py: 1,
-                border: 1,
-                borderColor: selectedChoiceId === choice.id ? 'primary.main' : 'divider',
-                borderRadius: 1,
-                bgcolor: selectedChoiceId === choice.id ? 'action.selected' : 'background.paper',
-              }}
-            />
-          ))}
-        </RadioGroup>
+        {state === 'error' && (
+          <Alert severity="error">
+            {error || 'The checkpoint could not be loaded. Please try again.'}
+          </Alert>
+        )}
+
+        {question && state !== 'error' && (
+          <>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 2 }}>
+              {question.prompt}
+            </Typography>
+
+            <RadioGroup
+              value={selectedChoiceId}
+              onChange={(event) => setSelectedChoiceId(event.target.value)}
+              sx={{ gap: 1 }}
+            >
+              {question.choices.map((choice) => (
+                <FormControlLabel
+                  key={choice.id}
+                  value={choice.id}
+                  disabled={isBusy}
+                  control={<Radio />}
+                  label={choice.text}
+                  sx={{
+                    m: 0,
+                    px: 1.5,
+                    py: 1,
+                    border: 1,
+                    borderColor: selectedChoiceId === choice.id ? 'primary.main' : 'divider',
+                    borderRadius: 1,
+                    bgcolor: selectedChoiceId === choice.id ? 'action.selected' : 'background.paper',
+                  }}
+                />
+              ))}
+            </RadioGroup>
+          </>
+        )}
 
         {feedback && (
-          <Alert severity="warning" sx={{ mt: 2 }}>
+          <Alert severity={feedbackSeverity} sx={{ mt: 2 }}>
             {feedback}
           </Alert>
         )}
       </DialogContent>
 
       <DialogActions sx={{ px: 3, pb: 2 }}>
-        <Button onClick={handleCancel} color="inherit">
-          Cancel
-        </Button>
-        <Button
-          onClick={handleSubmit}
-          variant="contained"
-          disabled={!selectedChoiceId}
-          startIcon={<CheckCircleIcon />}
-        >
-          Check
-        </Button>
+        {state === 'error' && (
+          <Button onClick={onRetry} variant="outlined">
+            Retry
+          </Button>
+        )}
+        {state === 'showing_feedback' ? (
+          <Button
+            onClick={onContinue}
+            variant="contained"
+            startIcon={<ArrowForwardIcon />}
+          >
+            Next question
+          </Button>
+        ) : (
+          <Button
+            onClick={handleSubmit}
+            variant="contained"
+            disabled={!canSubmit}
+            startIcon={<CheckCircleIcon />}
+          >
+            {isSubmitting ? 'Checking...' : 'Check'}
+          </Button>
+        )}
       </DialogActions>
     </Dialog>
   )

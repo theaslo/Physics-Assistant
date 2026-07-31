@@ -81,6 +81,7 @@ class FakeConnection:
         )
         self.fetchrow_calls = []
         self.fetchval_calls = []
+        self.inserted_attempts = []
 
     async def fetchrow(self, query, *args):
         self.fetchrow_calls.append((query, args))
@@ -94,6 +95,17 @@ class FakeConnection:
 
     async def fetchval(self, query, *args):
         self.fetchval_calls.append((query, args))
+        if "SELECT COUNT(*)" in query and "FROM hitl_attempts" in query:
+            question_id, user_id, session_id = args
+            return sum(
+                1
+                for inserted in self.inserted_attempts
+                if inserted[0] == question_id
+                and inserted[1] == user_id
+                and (session_id is None or inserted[2] == session_id)
+            )
+        if "INSERT INTO hitl_attempts" in query:
+            self.inserted_attempts.append(args)
         return uuid.UUID("33333333-3333-4333-8333-333333333333")
 
     async def fetch(self, query, *args):
@@ -152,6 +164,19 @@ async def test_existing_db_startup_verifies_schema(monkeypatch):
     db.redis.initialize = AsyncMock(return_value=True)
 
     assert await db.initialize() is True
+    db.postgres.ensure_schema.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_existing_db_startup_allows_postgres_only_degraded_mode(monkeypatch):
+    db = DatabaseManager()
+    db.postgres.initialize = AsyncMock(return_value=True)
+    db.postgres.ensure_schema = AsyncMock(return_value=True)
+    db.neo4j.initialize = AsyncMock(return_value=False)
+    db.redis.initialize = AsyncMock(return_value=False)
+
+    assert await db.initialize() is True
+    assert db._initialized is True
     db.postgres.ensure_schema.assert_awaited_once()
 
 
@@ -226,7 +251,11 @@ def test_wrong_first_leg_returns_second_hitl_leg_then_scores_correct(client, fak
     assert wrong_payload["next_question"]["id"] == str(FORCES_Q2_ID)
     assert wrong_payload["next_question"]["leg"] == 2
 
-    first_insert_args = fake_db.conn.fetchval_calls[0][1]
+    insert_calls = [
+        call for call in fake_db.conn.fetchval_calls
+        if "INSERT INTO hitl_attempts" in call[0]
+    ]
+    first_insert_args = insert_calls[0][1]
     assert first_insert_args[3] == "forces"
     assert first_insert_args[6] is False
 
@@ -246,9 +275,52 @@ def test_wrong_first_leg_returns_second_hitl_leg_then_scores_correct(client, fak
     assert correct_payload["proceed"] is True
     assert correct_payload["next_question"] is None
 
-    second_insert_args = fake_db.conn.fetchval_calls[1][1]
+    insert_calls = [
+        call for call in fake_db.conn.fetchval_calls
+        if "INSERT INTO hitl_attempts" in call[0]
+    ]
+    second_insert_args = insert_calls[1][1]
     assert second_insert_args[3] == "forces"
     assert second_insert_args[6] is True
+
+
+def test_wrong_second_leg_allows_retry_then_progresses_after_max_attempts(client):
+    first_wrong_response = client.post(
+        "/knowledge-transfer/attempts",
+        json={
+            "user_id": "react_user",
+            "question_id": str(FORCES_Q2_ID),
+            "agent_type": "forces_agent",
+            "selected_choice_id": "vf_squared",
+        },
+    )
+
+    assert first_wrong_response.status_code == 200
+    first_payload = first_wrong_response.json()
+    assert first_payload["is_correct"] is False
+    assert first_payload["proceed"] is False
+    assert first_payload["can_retry"] is True
+    assert first_payload["attempt_count"] == 1
+    assert first_payload["next_question"] is None
+
+    second_wrong_response = client.post(
+        "/knowledge-transfer/attempts",
+        json={
+            "user_id": "react_user",
+            "question_id": str(FORCES_Q2_ID),
+            "agent_type": "physics_forces_agent",
+            "selected_choice_id": "vf_squared",
+        },
+    )
+
+    assert second_wrong_response.status_code == 200
+    second_payload = second_wrong_response.json()
+    assert second_payload["is_correct"] is False
+    assert second_payload["proceed"] is True
+    assert second_payload["can_retry"] is False
+    assert second_payload["max_attempts_reached"] is True
+    assert second_payload["attempt_count"] == 2
+    assert "sum F_x = m*a_x" in second_payload["feedback"]
 
 
 def test_hitl_attempt_aggregate_normalizes_agent_filter(client):

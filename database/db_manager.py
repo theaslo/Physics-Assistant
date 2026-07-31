@@ -395,13 +395,18 @@ class DatabaseManager:
         normalized_results = [postgres_ready, neo4j_ready, redis_ready]
         success_count = sum(1 for result in normalized_results if result is True)
         
-        if success_count == 3:
+        if postgres_ready is True:
             self._initialized = True
-            logger.info("✅ All databases initialized successfully")
+            if success_count == 3:
+                logger.info("✅ All databases initialized successfully")
+            else:
+                logger.warning(
+                    f"⚠️ PostgreSQL initialized; optional databases degraded ({success_count}/3 ready)"
+                )
             return True
-        else:
-            logger.warning(f"⚠️ Only {success_count}/3 databases initialized")
-            return False
+
+        logger.warning(f"⚠️ Only {success_count}/3 databases initialized")
+        return False
     
     async def close(self):
         """Close all database connections"""

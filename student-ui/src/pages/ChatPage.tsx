@@ -1,4 +1,5 @@
 import { useEffect, useCallback, useState } from 'react'
+import axios from 'axios'
 import {
   Box,
   Drawer,
@@ -18,12 +19,14 @@ import {
 import { useStore, useMessages, useSelectedAgentInfo } from '../stores/chat-store'
 import type { Message } from '../stores/chat-store'
 import { apiClient } from '../services/api-client'
+import type { KnowledgeTransferQuestion } from '../services/api-client'
 import AgentSelector from '../components/AgentSelector'
 import ChatMessage from '../components/ChatMessage'
 import ChatInput from '../components/ChatInput'
 import WelcomeMessage from '../components/WelcomeMessage'
 import PhysicsConstants from '../components/PhysicsConstants'
 import HumanInTheLoopDialog, {
+  HitlDialogState,
   HitlQuestion,
   HitlResult,
 } from '../components/HumanInTheLoopDialog'
@@ -49,7 +52,13 @@ type HitlSession = {
   activeProblem?: string
   userMessage: Message
   priorMessages: ConversationMessage[]
-  questions: HitlQuestion[]
+  question: HitlQuestion | null
+  pendingQuestion?: HitlQuestion | null
+  status: HitlDialogState
+  feedback: string | null
+  feedbackSeverity: 'success' | 'warning' | 'error'
+  error: string | null
+  results: HitlResult[]
 }
 
 type SendToAgentInput = {
@@ -1060,6 +1069,26 @@ function buildHitlQuestions(agentId: string, problem: string): HitlQuestion[] {
   return []
 }
 
+function formatAgentTitle(agentType: string) {
+  return agentType
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
+function mapKnowledgeTransferQuestion(question: KnowledgeTransferQuestion): HitlQuestion {
+  return {
+    id: question.id,
+    title: `${formatAgentTitle(question.agent_type)} Check`,
+    prompt: question.question_text,
+    choices: question.choices,
+    leg: question.leg,
+  }
+}
+
+function getHttpStatus(error: unknown) {
+  return axios.isAxiosError(error) ? error.response?.status : undefined
+}
+
 export default function ChatPage() {
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('md'))
@@ -1172,6 +1201,88 @@ export default function ChatPage() {
     [user, addMessage, setLoading, setError]
   )
 
+  const completeHitlSession = useCallback(
+    (session: HitlSession, results: HitlResult[]) => {
+      setHitlSession(null)
+      void sendMessageToAgent({
+        agentId: session.agentId,
+        message: session.message,
+        userMessage: session.userMessage,
+        priorMessages: session.priorMessages,
+        activeProblem: session.activeProblem,
+        guidedTutoring: {
+          full_solution_allowed: true,
+          reason: results.some((result) => result.maxAttemptsReached)
+            ? 'hitl_max_attempts_reached'
+            : 'hitl_checkpoint_correct',
+          hitl_results: results,
+          checkpoint_question_ids: results.map((result) => result.questionId),
+        },
+      })
+    },
+    [sendMessageToAgent]
+  )
+
+  const loadHitlQuestionForSession = useCallback(
+    async (session: HitlSession) => {
+      setHitlSession({
+        ...session,
+        question: null,
+        pendingQuestion: null,
+        status: 'loading_question',
+        feedback: null,
+        error: null,
+      })
+
+      try {
+        const response = await apiClient.pickKnowledgeTransferQuestion(session.agentId)
+        const question = mapKnowledgeTransferQuestion(response.question)
+
+        if (question.choices.length === 0) {
+          throw new Error('The HITL checkpoint has no answer choices.')
+        }
+
+        setHitlSession((current) =>
+          current?.userMessage.id === session.userMessage.id
+            ? {
+                ...current,
+                question,
+                pendingQuestion: null,
+                status: 'awaiting_answer',
+                feedback: null,
+                error: null,
+              }
+            : current
+        )
+      } catch (err) {
+        if (getHttpStatus(err) === 404) {
+          setHitlSession(null)
+          await sendMessageToAgent({
+            agentId: session.agentId,
+            message: session.message,
+            userMessage: session.userMessage,
+            priorMessages: session.priorMessages,
+            activeProblem: session.activeProblem,
+          })
+          return
+        }
+
+        setHitlSession((current) =>
+          current?.userMessage.id === session.userMessage.id
+            ? {
+                ...current,
+                status: 'error',
+                feedback: null,
+                feedbackSeverity: 'error',
+                error: 'The reasoning checkpoint could not be loaded. Please retry.',
+              }
+            : current
+        )
+      }
+    },
+    [sendMessageToAgent]
+  )
+
   // Handle sending messages
   const handleSendMessage = useCallback(
     async (message: string) => {
@@ -1187,24 +1298,32 @@ export default function ChatPage() {
       }
       const priorMessages = messages
       const activeProblem = inferActiveProblem(priorMessages, trimmedMessage)
-      const hitlQuestions = looksLikePhysicsProblem(trimmedMessage)
-        ? buildHitlQuestions(selectedAgent, activeProblem || trimmedMessage)
-        : []
+      const shouldStartHitl = looksLikePhysicsProblem(trimmedMessage)
+        && buildHitlQuestions(selectedAgent, activeProblem || trimmedMessage).length > 0
 
       addMessage(userMessage)
       setError(null)
 
-      if (hitlQuestions.length > 0) {
-        setLoading(false)
-        setHitlSession({
+      if (shouldStartHitl) {
+        const pendingSession: HitlSession = {
           agentId: selectedAgent,
           agentName: selectedAgentInfo?.name || selectedAgent,
           message: trimmedMessage,
           activeProblem,
           userMessage,
           priorMessages,
-          questions: hitlQuestions,
-        })
+          question: null,
+          pendingQuestion: null,
+          status: 'loading_question',
+          feedback: null,
+          feedbackSeverity: 'warning',
+          error: null,
+          results: [],
+        }
+
+        setLoading(false)
+        setHitlSession(pendingSession)
+        void loadHitlQuestionForSession(pendingSession)
         return
       }
 
@@ -1223,36 +1342,141 @@ export default function ChatPage() {
       addMessage,
       setError,
       setLoading,
+      loadHitlQuestionForSession,
       sendMessageToAgent,
     ]
   )
 
-  const handleHitlCancel = useCallback(() => {
-    setHitlSession(null)
-    setLoading(false)
-  }, [setLoading])
+  const handleHitlRetry = useCallback(() => {
+    if (!hitlSession) return
 
-  const handleHitlComplete = useCallback(
-    (results: HitlResult[]) => {
-      if (!hitlSession) return
-
-      setHitlSession(null)
-      void sendMessageToAgent({
-        agentId: hitlSession.agentId,
-        message: hitlSession.message,
-        userMessage: hitlSession.userMessage,
-        priorMessages: hitlSession.priorMessages,
-        activeProblem: hitlSession.activeProblem,
-        guidedTutoring: {
-          full_solution_allowed: true,
-          reason: 'hitl_checkpoint_correct',
-          hitl_results: results,
-          checkpoint_question_ids: results.map((result) => result.questionId),
-        },
+    if (hitlSession.question) {
+      setHitlSession({
+        ...hitlSession,
+        status: 'awaiting_answer',
+        pendingQuestion: null,
+        feedback: null,
+        error: null,
       })
+      return
+    }
+
+    void loadHitlQuestionForSession(hitlSession)
+  }, [hitlSession, loadHitlQuestionForSession])
+
+  const handleHitlSubmit = useCallback(
+    async (selectedChoiceId: string) => {
+      if (!hitlSession?.question) return
+
+      const submittedQuestion = hitlSession.question
+
+      setHitlSession({
+        ...hitlSession,
+        status: 'submitting_answer',
+        feedback: null,
+        error: null,
+      })
+
+      try {
+        const response = await apiClient.submitKnowledgeTransferAttempt({
+          user_id: user?.username || 'react_user',
+          question_id: submittedQuestion.id,
+          agent_type: hitlSession.agentId,
+          selected_choice_id: selectedChoiceId,
+          metadata: {
+            active_problem: hitlSession.activeProblem,
+            original_message: hitlSession.message,
+            question_leg: submittedQuestion.leg,
+          },
+        })
+
+        const result: HitlResult = {
+          questionId: submittedQuestion.id,
+          selectedChoiceId,
+          isCorrect: response.is_correct,
+          attemptId: response.attempt_id,
+          maxAttemptsReached: response.max_attempts_reached,
+        }
+        const nextResults = [...hitlSession.results, result]
+        const nextFeedback = response.feedback || (
+          response.is_correct ? 'Correct. You can proceed.' : 'Not quite. Try the next checkpoint.'
+        )
+
+        if (response.proceed) {
+          const completedSession = {
+            ...hitlSession,
+            results: nextResults,
+          }
+
+          setHitlSession({
+            ...completedSession,
+            status: 'completed',
+            feedback: nextFeedback,
+            feedbackSeverity: response.is_correct ? 'success' : 'warning',
+            error: null,
+          })
+
+          window.setTimeout(() => {
+            completeHitlSession(completedSession, nextResults)
+          }, 700)
+          return
+        }
+
+        if (response.next_question) {
+          const nextQuestion = mapKnowledgeTransferQuestion(response.next_question)
+
+          setHitlSession({
+            ...hitlSession,
+            question: submittedQuestion,
+            pendingQuestion: nextQuestion,
+            status: 'showing_feedback',
+            feedback: nextFeedback,
+            feedbackSeverity: 'warning',
+            error: null,
+            results: nextResults,
+          })
+          return
+        }
+
+        setHitlSession({
+          ...hitlSession,
+          status: 'awaiting_answer',
+          feedback: nextFeedback,
+          feedbackSeverity: 'warning',
+          error: null,
+          results: nextResults,
+        })
+      } catch (err) {
+        const detail = axios.isAxiosError(err)
+          ? err.response?.data?.detail
+          : undefined
+
+        setHitlSession({
+          ...hitlSession,
+          status: 'error',
+          feedback: null,
+          feedbackSeverity: 'error',
+          error: typeof detail === 'string'
+            ? detail
+            : 'The answer could not be recorded. Please retry the checkpoint.',
+        })
+      }
     },
-    [hitlSession, sendMessageToAgent]
+    [completeHitlSession, hitlSession, user]
   )
+
+  const handleHitlContinue = useCallback(() => {
+    if (!hitlSession?.pendingQuestion) return
+
+    setHitlSession({
+      ...hitlSession,
+      question: hitlSession.pendingQuestion,
+      pendingQuestion: null,
+      status: 'awaiting_answer',
+      feedback: null,
+      error: null,
+    })
+  }, [hitlSession])
 
   // Sidebar content
   const sidebarContent = (
@@ -1436,9 +1660,14 @@ export default function ChatPage() {
       <HumanInTheLoopDialog
         open={Boolean(hitlSession)}
         agentName={hitlSession?.agentName || 'Physics Assistant'}
-        questions={hitlSession?.questions || []}
-        onCancel={handleHitlCancel}
-        onComplete={handleHitlComplete}
+        question={hitlSession?.question || null}
+        state={hitlSession?.status || 'loading_question'}
+        feedback={hitlSession?.feedback || null}
+        feedbackSeverity={hitlSession?.feedbackSeverity || 'warning'}
+        error={hitlSession?.error || null}
+        onSubmit={handleHitlSubmit}
+        onRetry={handleHitlRetry}
+        onContinue={handleHitlContinue}
       />
     </Box>
   )

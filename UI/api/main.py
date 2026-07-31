@@ -320,6 +320,62 @@ def _build_forces_spring_fallback_solution(problem: str) -> Optional[Dict[str, A
     }
 
 
+def _build_forces_newton_second_fallback_solution(problem: str) -> Optional[Dict[str, Any]]:
+    """Create a deterministic F = ma answer for simple one-force acceleration prompts."""
+    normalized = problem.lower()
+    if not any(cue in normalized for cue in ("acceleration", "accelerate", "accelerates")):
+        return None
+
+    mass = _extract_number(
+        [
+            r"\b(?:mass|box|block|object|crate)?\s*(?:is|=|of)?\s*([-+]?\d+(?:\.\d+)?)\s*kg\b",
+            r"\b([-+]?\d+(?:\.\d+)?)\s*kg\b",
+        ],
+        problem,
+    )
+    force = _extract_number(
+        [
+            r"\b(?:net\s+force|applied\s+force|force|pull(?:ed|s)?|push(?:ed|es)?)\s*(?:is|=|of|by|with)?\s*(?:a\s+)?([-+]?\d+(?:\.\d+)?)\s*n\b(?!\s*/)",
+            r"\b(?:with|by)\s+(?:a\s+)?([-+]?\d+(?:\.\d+)?)\s*n\b(?!\s*/)",
+            r"\b([-+]?\d+(?:\.\d+)?)\s*n\b(?!\s*/)\s*(?:net\s+)?force\b",
+        ],
+        problem,
+    )
+
+    if mass is None or force is None or mass == 0:
+        return None
+
+    acceleration = force / mass
+    mass_text = _format_graph_value(mass, "kg")
+    force_text = _format_graph_value(force, "N")
+    acceleration_text = _format_graph_value(acceleration, "m/s^2")
+    net_force_note = (
+        "Because the surface is frictionless, the applied horizontal force is the net horizontal force."
+        if "frictionless" in normalized
+        else "Treat the stated force as the net force along the direction of motion."
+    )
+
+    return {
+        "solution": (
+            "**Solution**\n\n"
+            f"Known values: mass m = {mass_text}, force F = {force_text}.\n\n"
+            f"{net_force_note}\n\n"
+            "Use Newton's second law:\n\n"
+            "- sum F = m*a\n"
+            "- a = sum F / m\n\n"
+            f"Substitute: a = ({force_text}) / ({mass_text}) = {acceleration_text}.\n\n"
+            f"Final answer: the acceleration is {acceleration_text} in the direction of the applied force."
+        ),
+        "metadata": {
+            "parsed_inputs": {
+                "mass": mass,
+                "force": force,
+                "acceleration": acceleration,
+            },
+        },
+    }
+
+
 def _parameter_map(payload: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return {
         parameter.get("symbol"): parameter
@@ -599,6 +655,21 @@ async def solve_problem(
                     tools_used=["hookes_law_fallback"],
                     metadata={
                         **spring_fallback["metadata"],
+                        "guided_tutoring": agent_context["guided_tutoring"],
+                    },
+                )
+
+            newton_second_fallback = _build_forces_newton_second_fallback_solution(solver_problem)
+            if newton_second_fallback:
+                return ProblemSolveResponse(
+                    success=True,
+                    agent_id=agent_id,
+                    problem=request.problem,
+                    solution=newton_second_fallback["solution"],
+                    reasoning="Used deterministic Newton's-second-law fallback for a simple force and acceleration calculation.",
+                    tools_used=["newtons_second_law_fallback"],
+                    metadata={
+                        **newton_second_fallback["metadata"],
                         "guided_tutoring": agent_context["guided_tutoring"],
                     },
                 )
