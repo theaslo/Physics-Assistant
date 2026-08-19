@@ -7,7 +7,7 @@ import aiohttp
 import logging
 import functools
 import inspect
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Dict, Any, Optional
 from contextlib import asynccontextmanager
 
@@ -19,6 +19,13 @@ class DatabaseLogger:
 
     def __init__(self, service_name: str):
         self.service_name = service_name
+        disabled = os.getenv("MCP_DISABLE_DATABASE_LOGGING", "").lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        self.enabled = not disabled
         self.api_host = os.getenv('DATABASE_API_HOST', 'localhost')
         self.api_port = int(os.getenv('DATABASE_API_PORT', '8001'))
         self.base_url = f"http://{self.api_host}:{self.api_port}"
@@ -74,6 +81,9 @@ class DatabaseLogger:
         Returns:
             bool: True if logging was successful, False otherwise
         """
+        if not self.enabled:
+            return False
+
         try:
             async with self.get_session() as session:
                 # Prepare the payload
@@ -86,7 +96,7 @@ class DatabaseLogger:
                     "success": success,
                     "error_message": error_message,
                     "service_name": self.service_name,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                     "metadata": {
                         "mcp_service": self.service_name,
                         "tool_category": "physics",
@@ -147,6 +157,9 @@ class DatabaseLogger:
         Returns:
             bool: True if connection is successful, False otherwise
         """
+        if not self.enabled:
+            return False
+
         try:
             async with self.get_session() as session:
                 async with session.get(f"{self.base_url}/health") as response:
@@ -168,12 +181,15 @@ class DatabaseLogger:
             status: Server status (starting, running, stopping, error)
             details: Additional status details
         """
+        if not self.enabled:
+            return
+
         try:
             async with self.get_session() as session:
                 payload = {
                     "service_name": self.service_name,
                     "status": status,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                     "details": details or {}
                 }
 
@@ -202,7 +218,7 @@ def create_tool_wrapper(db_logger: DatabaseLogger, tool_name: str):
     def decorator(original_tool):
         @functools.wraps(original_tool)
         async def wrapped_tool(*args, **kwargs):
-            start_time = datetime.utcnow()
+            start_time = datetime.now(UTC)
             success = True
             error_message = None
             response = ""
@@ -219,7 +235,7 @@ def create_tool_wrapper(db_logger: DatabaseLogger, tool_name: str):
                 raise
             finally:
                 # Calculate execution time
-                end_time = datetime.utcnow()
+                end_time = datetime.now(UTC)
                 execution_time = (end_time - start_time).total_seconds()
 
                 # Combine args and kwargs for logging

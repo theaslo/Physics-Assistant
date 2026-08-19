@@ -1,4 +1,28 @@
-This is not what I wanted. You should have asked! I want each directory in /Users/asli.tandogan_kunkel/Projects/Physics-Assistant to have their own pyproject.toml file with their own uv run commands. Please fix properly.
+# MCP Tools Status
 
+The `physics-mcp` CLI now routes all supported subject servers through
+`physics_mcp_tools.__init__.py`.
 
-I added a few more mcp servers to /Users/asli.tandogan_kunkel/Projects/Physics-Assistant/mcp_tools. This is the scaffolding of more to come. Please fix my pyproject.toml so that it runs properly with /Users/asli.tandogan_kunkel/Projects/Physics-Assistant/mcp_tools/__init__.py. I want to be able to run the command "uv run physics-mcp --run A-server --transport streamable_http" where A-server can be the forces_mcp_server or  any arg found in __init__.py. If you understand, complete it, if not, ask questions.
+Supported servers:
+- `forces-server`
+- `kinematics-server`
+- `circuit-server`
+- `math-server`
+- `momentum-server`
+- `energy-server`
+- `angular-motion-server`
+- `thermodynamics-server`
+- `waves-server`
+- `electromagnetism-server`
+- `optics-server`
+- `modern-physics-server`
+
+Current verification command:
+
+```bash
+python -m unittest discover -s tests -p 'test_*.py'
+```
+
+The circuit placeholder has been replaced with real circuit tools, and the
+waves, electromagnetism, optics, and circuit servers expose MCP factories for
+direct tool-level tests.

@@ -161,6 +161,24 @@ services:
       - database-api
     restart: unless-stopped
 
+  mcp-circuit:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    container_name: physics-mcp-circuit
+    environment:
+      MCP_SERVICE: circuit
+      MCP_PORT: 10102
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: streamable_http
+      DATABASE_API_HOST: database-api
+      DATABASE_API_PORT: 8001
+    networks:
+      - physics-network
+    depends_on:
+      - database-api
+    restart: unless-stopped
+
   mcp-math:
     build:
       context: .
@@ -368,6 +386,7 @@ services:
       # Physics 101 MCP servers
       MCP_FORCES_HOST: mcp-forces
       MCP_KINEMATICS_HOST: mcp-kinematics
+      MCP_CIRCUIT_HOST: mcp-circuit
       MCP_MATH_HOST: mcp-math
       MCP_MOMENTUM_HOST: mcp-momentum
       MCP_ENERGY_HOST: mcp-energy
@@ -388,6 +407,7 @@ services:
       # Physics 101
       - mcp-forces
       - mcp-kinematics
+      - mcp-circuit
       - mcp-math
       - mcp-energy
       - mcp-momentum

@@ -5,6 +5,7 @@ import logging
 import argparse
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.utilities.logging import get_logger#
+from physics_mcp_tools.mcp_runtime import run_fastmcp_server
 
 # Initialize FastMCP server
 #mcp = FastMCP("energy")
@@ -961,12 +962,7 @@ def serve(host, port, transport):
     logger.info(
         f'{NAME} MCP Server at {host}:{port} and transport {transport}'
     )
-    if transport == "sse":
-        mcp.sse_http_app.run(host=host, port=port)
-    if transport == "streamable_http":
-        import uvicorn
-        # Start the Streamable HTTP server
-        uvicorn.run(mcp.streamable_http_app, host=host, port=port)
+    run_fastmcp_server(mcp, host, port, transport)
 
 
 def main():

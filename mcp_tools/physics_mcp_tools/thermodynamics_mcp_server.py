@@ -8,6 +8,7 @@ import json
 import argparse
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.utilities.logging import get_logger
+from physics_mcp_tools.mcp_runtime import run_fastmcp_server
 
 NAME = "thermodynamics_mcp_server"
 logger = get_logger(__name__)
@@ -379,11 +380,7 @@ Key Points:
             return f"Error in Carnot efficiency calculation: {str(e)}"
 
     logger.info(f'{NAME} MCP Server at {host}:{port} and transport {transport}')
-    if transport == "sse":
-        mcp.sse_http_app.run(host=host, port=port)
-    if transport == "streamable_http":
-        import uvicorn
-        uvicorn.run(mcp.streamable_http_app, host=host, port=port)
+    run_fastmcp_server(mcp, host, port, transport)
 
 
 def main():

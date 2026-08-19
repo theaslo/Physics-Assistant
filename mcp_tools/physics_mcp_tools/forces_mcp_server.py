@@ -14,7 +14,7 @@ from physics_mcp_tools.forces_utils import (
     radians_to_degrees,
 )
 from physics_mcp_tools.database_logger import DatabaseLogger, create_tool_wrapper
-import uvicorn
+from physics_mcp_tools.mcp_runtime import run_fastmcp_server
 import argparse
 NAME = "forces_mcp_server"
 
@@ -958,12 +958,7 @@ Newton's Second Law Analysis (F = ma):
     except Exception as e:
         logger.warning(f"Database connection test failed: {e}")
 
-    if transport == "sse":
-        mcp.sse_http_app.run(host=host, port=port)
-    if transport == "streamable_http":
-        import uvicorn
-        # Start the Streamable HTTP server
-        uvicorn.run(mcp.streamable_http_app, host=host, port=port)
+    run_fastmcp_server(mcp, host, port, transport)
 
 def main():
     """CLI entry point for the physics-forces-mcp tool."""

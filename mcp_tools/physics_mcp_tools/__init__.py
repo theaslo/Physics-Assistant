@@ -1,10 +1,18 @@
-"""Physics Forces MCP Tool - Convenience methods to start servers."""
+"""Physics MCP Tool - Convenience methods to start subject servers."""
 
 import click
 
 
 @click.command()
-@click.option('--run', 'command', default='forces-server', help='Command to run')
+@click.option(
+    '--run',
+    'command',
+    default='forces-server',
+    help=(
+        'Server to run, e.g. forces-server, waves-server, '
+        'electromagnetism-server, or optics-server'
+    ),
+)
 @click.option(
     '--host',
     'host',
@@ -24,7 +32,7 @@ import click
     help='MCP Transport (stdio, sse, or streamable_http)',
 )
 def main(command, host, port, transport) -> None:
-    """Main entry point for the Physics Forces MCP server."""
+    """Main entry point for Physics Assistant MCP servers."""
     if command == 'forces-server':
         from physics_mcp_tools.forces_mcp_server import serve
         serve(host, port, transport)

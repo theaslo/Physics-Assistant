@@ -8,6 +8,8 @@ import json
 import argparse
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.utilities.logging import get_logger
+from physics_mcp_tools.database_logger import DatabaseLogger, create_tool_wrapper
+from physics_mcp_tools.mcp_runtime import run_fastmcp_server
 
 NAME = "electromagnetism_mcp_server"
 logger = get_logger(__name__)
@@ -19,12 +21,14 @@ MU_0 = 4e-7 * math.pi  # T·m/A - Permeability of free space
 E_CHARGE = 1.602e-19  # C - Elementary charge
 
 
-def serve(host, port, transport):
-    """Initialize and run the Electromagnetism MCP server."""
+def create_mcp():
+    """Create the Electromagnetism MCP server."""
     logger.info('Starting Electromagnetism MCP Server')
     mcp = FastMCP(NAME, stateless_http=False)
+    db_logger = DatabaseLogger("electromagnetism")
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "coulombs_law")
     async def coulombs_law(coulomb_data: str) -> str:
         """
         Calculate electric force between point charges using Coulomb's Law.
@@ -85,6 +89,7 @@ Comparison:
             return f"Error in Coulomb's Law calculation: {str(e)}"
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "electric_field")
     async def electric_field(field_data: str) -> str:
         """
         Calculate electric field from point charge(s).
@@ -123,6 +128,50 @@ Electric Field Analysis:
                 result += f"E = {E:.4e} N/C (or V/m)\n\n"
                 result += f"Direction: {direction}\n"
 
+            elif "charges" in data:
+                charges = data["charges"]
+                point = data.get("point", {"x": 0, "y": 0})
+                px = float(point.get("x", 0))
+                py = float(point.get("y", 0))
+                ex_total = 0.0
+                ey_total = 0.0
+
+                result += "Multiple Point Charges (2D superposition):\n"
+                result += f"- Field point: ({px:.4f}, {py:.4f}) m\n\n"
+
+                for index, charge in enumerate(charges, 1):
+                    q = float(charge.get("q", charge.get("charge")))
+                    x = float(charge.get("x", 0))
+                    y = float(charge.get("y", 0))
+                    dx = px - x
+                    dy = py - y
+                    r_squared = dx**2 + dy**2
+
+                    if r_squared == 0:
+                        return (
+                            "Error in electric field calculation: field point cannot "
+                            "be at the same location as a point charge"
+                        )
+
+                    r = math.sqrt(r_squared)
+                    e_magnitude_signed = K_COULOMB * q / r_squared
+                    ex = e_magnitude_signed * dx / r
+                    ey = e_magnitude_signed * dy / r
+                    ex_total += ex
+                    ey_total += ey
+
+                    result += f"Charge {index}: q = {q:.2e} C at ({x:.4f}, {y:.4f}) m\n"
+                    result += f"  r = {r:.4f} m, E_x = {ex:.4e} N/C, E_y = {ey:.4e} N/C\n"
+
+                e_total = math.sqrt(ex_total**2 + ey_total**2)
+                angle = math.degrees(math.atan2(ey_total, ex_total))
+
+                result += f"\nTotal Electric Field:\n"
+                result += f"E_x = {ex_total:.4e} N/C\n"
+                result += f"E_y = {ey_total:.4e} N/C\n"
+                result += f"|E| = {e_total:.4e} N/C\n"
+                result += f"Direction = {angle:.2f}° from +x axis\n"
+
             elif "voltage" in data and "distance" in data:
                 # Uniform field
                 V = float(data.get("voltage", data.get("V")))
@@ -150,6 +199,7 @@ Electric Field Properties:
             return f"Error in electric field calculation: {str(e)}"
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "electric_potential")
     async def electric_potential(potential_data: str) -> str:
         """
         Calculate electric potential and potential energy.
@@ -206,6 +256,7 @@ Electric Potential Analysis:
             return f"Error in electric potential calculation: {str(e)}"
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "capacitance")
     async def capacitance(capacitor_data: str) -> str:
         """
         Calculate capacitance, charge, energy, and combinations.
@@ -281,6 +332,7 @@ Capacitor Analysis:
             return f"Error in capacitance calculation: {str(e)}"
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "ohms_law")
     async def ohms_law(circuit_data: str) -> str:
         """
         Apply Ohm's Law (V = IR) and calculate power.
@@ -346,6 +398,7 @@ Ohm's Law Analysis (V = IR):
             return f"Error in Ohm's Law calculation: {str(e)}"
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "resistor_network")
     async def resistor_network(network_data: str) -> str:
         """
         Calculate equivalent resistance for series and parallel combinations.
@@ -405,6 +458,7 @@ Resistor Network Analysis:
             return f"Error in resistor network calculation: {str(e)}"
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "magnetic_force")
     async def magnetic_force(magnetic_data: str) -> str:
         """
         Calculate magnetic force on moving charge or current-carrying wire.
@@ -467,6 +521,7 @@ Magnetic Force Analysis:
             return f"Error in magnetic force calculation: {str(e)}"
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "magnetic_field_wire")
     async def magnetic_field_wire(wire_data: str) -> str:
         """
         Calculate magnetic field from current-carrying wire.
@@ -536,6 +591,7 @@ Magnetic Field Analysis:
             return f"Error in magnetic field calculation: {str(e)}"
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "faradays_law")
     async def faradays_law(faraday_data: str) -> str:
         """
         Calculate induced EMF using Faraday's Law of Induction.
@@ -582,6 +638,12 @@ Faraday's Law of Induction:
                 result += f"- Number of Turns (N): {N}\n\n"
                 result += f"Flux Change: ΔΦ = ΔB × A = {dB:.4f} × {A:.6f} = {d_flux:.4e} Wb\n\n"
 
+            else:
+                return (
+                    "Error in Faraday's Law calculation: provide either "
+                    "flux_change or both B_change and area"
+                )
+
             result += f"Faraday's Law: ε = -N(dΦ/dt)\n\n"
             result += f"Induced EMF:\n"
             result += f"ε = -{N} × {d_flux:.4e} / {dt:.4f}\n"
@@ -594,12 +656,14 @@ Faraday's Law of Induction:
         except Exception as e:
             return f"Error in Faraday's Law calculation: {str(e)}"
 
+    return mcp
+
+
+def serve(host, port, transport):
+    """Initialize and run the Electromagnetism MCP server."""
+    mcp = create_mcp()
     logger.info(f'{NAME} MCP Server at {host}:{port} and transport {transport}')
-    if transport == "sse":
-        mcp.sse_http_app.run(host=host, port=port)
-    if transport == "streamable_http":
-        import uvicorn
-        uvicorn.run(mcp.streamable_http_app, host=host, port=port)
+    run_fastmcp_server(mcp, host, port, transport)
 
 
 def main():

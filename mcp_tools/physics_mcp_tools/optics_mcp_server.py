@@ -8,6 +8,8 @@ import json
 import argparse
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.utilities.logging import get_logger
+from physics_mcp_tools.database_logger import DatabaseLogger, create_tool_wrapper
+from physics_mcp_tools.mcp_runtime import run_fastmcp_server
 
 NAME = "optics_mcp_server"
 logger = get_logger(__name__)
@@ -16,12 +18,14 @@ logger = get_logger(__name__)
 SPEED_OF_LIGHT = 2.998e8  # m/s
 
 
-def serve(host, port, transport):
-    """Initialize and run the Optics MCP server."""
+def create_mcp():
+    """Create the Optics MCP server."""
     logger.info('Starting Optics MCP Server')
     mcp = FastMCP(NAME, stateless_http=False)
+    db_logger = DatabaseLogger("optics")
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "snells_law")
     async def snells_law(refraction_data: str) -> str:
         """
         Apply Snell's Law for refraction at interface between media.
@@ -99,6 +103,7 @@ Common Refractive Indices:
             return f"Error in Snell's Law calculation: {str(e)}"
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "lens_mirror_equation")
     async def lens_mirror_equation(optics_data: str) -> str:
         """
         Apply thin lens/mirror equation to find image properties.
@@ -194,6 +199,7 @@ Magnification: M = -dᵢ/dₒ = hᵢ/hₒ
             return f"Error in lens/mirror calculation: {str(e)}"
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "diffraction_grating")
     async def diffraction_grating(diffraction_data: str) -> str:
         """
         Calculate diffraction pattern for single slit, double slit, or grating.
@@ -292,6 +298,7 @@ Order: m = {m}
             return f"Error in diffraction calculation: {str(e)}"
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "thin_film_interference")
     async def thin_film_interference(film_data: str) -> str:
         """
         Analyze thin film interference (soap bubbles, oil slicks, coatings).
@@ -311,7 +318,10 @@ Order: m = {m}
             t = float(data.get("thickness", data.get("t", 200e-9)))
             n_film = float(data.get("n_film", data.get("n", 1.33)))
             n_air = float(data.get("n_air", 1.0))
-            n_substrate = float(data.get("n_substrate", data.get("n_sub", None)))
+            n_substrate_value = data.get("n_substrate", data.get("n_sub", None))
+            n_substrate = (
+                float(n_substrate_value) if n_substrate_value is not None else None
+            )
 
             result = f"""
 Thin Film Interference Analysis:
@@ -322,7 +332,7 @@ Given:
 - Film Refractive Index (n): {n_film:.4f}
 - Air Refractive Index: {n_air:.4f}
 """
-            if n_substrate:
+            if n_substrate is not None:
                 result += f"- Substrate Refractive Index: {n_substrate:.4f}\n"
 
             # Optical path difference
@@ -334,14 +344,19 @@ Optical Path Difference: 2nt = 2 × {n_film:.4f} × {t:.2e} = {optical_path:.2e}
 Phase Changes on Reflection:
 - Air→Film interface: {"π phase shift (n_film > n_air)" if n_film > n_air else "No phase shift"}
 """
-            if n_substrate:
-                result += f"- Film→Substrate: {"π phase shift (n_sub > n_film)" if n_substrate > n_film else "No phase shift"}\n"
+            if n_substrate is not None:
+                substrate_phase = (
+                    "π phase shift (n_sub > n_film)"
+                    if n_substrate > n_film
+                    else "No phase shift"
+                )
+                result += f"- Film→Substrate: {substrate_phase}\n"
 
             # Determine interference conditions
             phase_shift_count = 0
             if n_film > n_air:
                 phase_shift_count += 1
-            if n_substrate and n_substrate > n_film:
+            if n_substrate is not None and n_substrate > n_film:
                 phase_shift_count += 1
 
             result += f"\nInterference Conditions:\n"
@@ -387,6 +402,7 @@ Applications:
             return f"Error in thin film interference calculation: {str(e)}"
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "optical_power_diopters")
     async def optical_power_diopters(power_data: str) -> str:
         """
         Calculate lens power in diopters and combined lens systems.
@@ -459,12 +475,14 @@ Common Vision Corrections:
         except Exception as e:
             return f"Error in optical power calculation: {str(e)}"
 
+    return mcp
+
+
+def serve(host, port, transport):
+    """Initialize and run the Optics MCP server."""
+    mcp = create_mcp()
     logger.info(f'{NAME} MCP Server at {host}:{port} and transport {transport}')
-    if transport == "sse":
-        mcp.sse_http_app.run(host=host, port=port)
-    if transport == "streamable_http":
-        import uvicorn
-        uvicorn.run(mcp.streamable_http_app, host=host, port=port)
+    run_fastmcp_server(mcp, host, port, transport)
 
 
 def main():

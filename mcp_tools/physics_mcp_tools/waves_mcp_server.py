@@ -8,6 +8,8 @@ import json
 import argparse
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.utilities.logging import get_logger
+from physics_mcp_tools.database_logger import DatabaseLogger, create_tool_wrapper
+from physics_mcp_tools.mcp_runtime import run_fastmcp_server
 
 NAME = "waves_mcp_server"
 logger = get_logger(__name__)
@@ -18,12 +20,14 @@ SPEED_OF_LIGHT = 3e8  # m/s
 I_REFERENCE = 1e-12  # W/m² - Reference intensity for decibels
 
 
-def serve(host, port, transport):
-    """Initialize and run the Waves MCP server."""
+def create_mcp():
+    """Create the Waves MCP server."""
     logger.info('Starting Waves MCP Server')
     mcp = FastMCP(NAME, stateless_http=False)
+    db_logger = DatabaseLogger("waves")
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "wave_equation")
     async def wave_equation(wave_data: str) -> str:
         """
         Solve wave equation problems using v = fλ.
@@ -97,6 +101,7 @@ Additional Wave Properties:
             return f"Error in wave equation calculation: {str(e)}"
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "doppler_effect")
     async def doppler_effect(doppler_data: str) -> str:
         """
         Calculate observed frequency due to Doppler effect.
@@ -168,6 +173,7 @@ Applications:
             return f"Error in Doppler effect calculation: {str(e)}"
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "sound_intensity_decibels")
     async def sound_intensity_decibels(sound_data: str) -> str:
         """
         Calculate sound intensity level in decibels or convert between intensity and dB.
@@ -241,6 +247,7 @@ Note: Every 10 dB increase = 10× intensity = ~2× perceived loudness
             return f"Error in sound intensity calculation: {str(e)}"
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "standing_waves")
     async def standing_waves(standing_wave_data: str) -> str:
         """
         Calculate standing wave frequencies and patterns.
@@ -257,7 +264,7 @@ Note: Every 10 dB increase = 10× intensity = ~2× perceived loudness
             str: Complete standing wave analysis with harmonics
         """
         try:
-            data = json.loads(standing_wave_data) if isinstance(standing_wave_data, str) else standing_data
+            data = json.loads(standing_wave_data) if isinstance(standing_wave_data, str) else standing_wave_data
 
             wave_type = data.get("type", "string").lower()
             L = float(data.get("length", data.get("L", 1)))
@@ -317,6 +324,7 @@ Applications:
             return f"Error in standing wave calculation: {str(e)}"
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "wave_interference")
     async def wave_interference(interference_data: str) -> str:
         """
         Analyze wave interference patterns (constructive and destructive).
@@ -382,12 +390,14 @@ Interference Conditions:
         except Exception as e:
             return f"Error in interference analysis: {str(e)}"
 
+    return mcp
+
+
+def serve(host, port, transport):
+    """Initialize and run the Waves MCP server."""
+    mcp = create_mcp()
     logger.info(f'{NAME} MCP Server at {host}:{port} and transport {transport}')
-    if transport == "sse":
-        mcp.sse_http_app.run(host=host, port=port)
-    if transport == "streamable_http":
-        import uvicorn
-        uvicorn.run(mcp.streamable_http_app, host=host, port=port)
+    run_fastmcp_server(mcp, host, port, transport)
 
 
 def main():

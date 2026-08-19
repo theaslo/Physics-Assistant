@@ -69,9 +69,42 @@ analyze_forces_on_incline(mass=5.0, angle_degrees=30, coefficient_friction=0.3)
 *Electrical circuit analysis and calculations*
 
 **Capabilities:**
-- **DC Circuits**: Analyze simple series and parallel resistor circuits
-- **Ohm's Law**: Calculate voltage, current, and resistance relationships
-- **Power Calculations**: Determine electrical power in circuits
+- **Ohm's Law**: Solve voltage, current, resistance, and power relationships
+- **Resistor Networks**: Calculate equivalent resistance for series, parallel, and nested networks
+- **Voltage Dividers**: Determine voltage drops and series current
+- **RC Circuits**: Analyze charging and discharging time constants
+
+### 🌊 Waves Server (`waves-server`)
+*Wave motion, sound, acoustics, and interference*
+
+**Capabilities:**
+- **Wave Equation**: Solve velocity, frequency, wavelength, period, angular frequency, and wave number
+- **Doppler Effect**: Analyze frequency shifts for moving sources and observers
+- **Sound Intensity**: Convert between intensity and decibel level
+- **Standing Waves**: Calculate harmonics for strings, open pipes, and closed pipes
+- **Wave Interference**: Classify constructive, destructive, and partial interference
+
+### 🧲 Electromagnetism Server (`electromagnetism-server`)
+*Electricity, magnetism, circuits, and induction*
+
+**Capabilities:**
+- **Coulomb's Law**: Calculate point-charge force magnitude and direction
+- **Electric Fields**: Analyze single-charge, uniform, and multi-charge 2D fields
+- **Electric Potential**: Calculate potential and potential energy
+- **Capacitance**: Analyze parallel plates, charge, energy, series, and parallel combinations
+- **Circuit Tools**: Apply Ohm's Law and equivalent resistance calculations
+- **Magnetism**: Calculate magnetic forces and fields from currents
+- **Induction**: Apply Faraday's Law for changing flux
+
+### 🔎 Optics Server (`optics-server`)
+*Geometric optics, diffraction, and interference*
+
+**Capabilities:**
+- **Snell's Law**: Calculate refraction angles and critical angles
+- **Lens/Mirror Equation**: Solve image distance, focal length, object distance, and magnification
+- **Diffraction**: Analyze single-slit, double-slit, and grating patterns
+- **Thin Film Interference**: Evaluate coatings, soap films, and optical path differences
+- **Optical Power**: Convert focal length and diopters, including combined thin lenses
 
 ---
 
@@ -108,7 +141,7 @@ uv run physics-mcp --run forces-server --host 0.0.0.0 --port 8080
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--run` | `forces-server` | Server to run: `forces-server`, `kinematics-server`, `circuit-server` |
+| `--run` | `forces-server` | Server to run: `forces-server`, `kinematics-server`, `math-server`, `momentum-server`, `energy-server`, `angular-motion-server`, `circuit-server`, `thermodynamics-server`, `waves-server`, `electromagnetism-server`, `optics-server`, `modern-physics-server` |
 | `--transport` | `streamable_http` | Transport: `stdio`, `sse`, `streamable_http` |
 | `--host` | `localhost` | Host address to bind server |
 | `--port` | `10100` | Port number to bind server |
@@ -146,6 +179,21 @@ Add to your Claude Desktop MCP settings:
       "command": "uv", 
       "args": ["run", "physics-mcp", "--run", "kinematics-server"],
       "cwd": "/path/to/Physics-Assistant/mcp_tools"
+    },
+    "physics-waves": {
+      "command": "uv",
+      "args": ["run", "physics-mcp", "--run", "waves-server"],
+      "cwd": "/path/to/Physics-Assistant/mcp_tools"
+    },
+    "physics-electromagnetism": {
+      "command": "uv",
+      "args": ["run", "physics-mcp", "--run", "electromagnetism-server"],
+      "cwd": "/path/to/Physics-Assistant/mcp_tools"
+    },
+    "physics-optics": {
+      "command": "uv",
+      "args": ["run", "physics-mcp", "--run", "optics-server"],
+      "cwd": "/path/to/Physics-Assistant/mcp_tools"
     }
   }
 }
@@ -182,6 +230,9 @@ mcp_tools/
 │   ├── forces_mcp_server.py   # Forces calculation server
 │   ├── kinematics_mcp_server.py # Motion analysis server
 │   ├── circuit_mcp_server.py  # Electrical circuit server
+│   ├── waves_mcp_server.py    # Waves and sound server
+│   ├── electromagnetism_mcp_server.py # E&M calculation server
+│   ├── optics_mcp_server.py   # Optics calculation server
 │   └── forces_utils.py        # Shared physics utilities
 ├── pyproject.toml             # Package configuration
 ├── README.md                  # This file
@@ -217,8 +268,8 @@ async def my_physics_tool(param1: float, param2: str) -> str:
 # Install dev dependencies
 uv sync --group dev
 
-# Run tests (when available)
-uv run pytest
+# Run tests
+python -m unittest discover -s tests -p 'test_*.py'
 
 # Code formatting
 uv run black physics_mcp_tools/
