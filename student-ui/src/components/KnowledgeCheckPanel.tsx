@@ -25,7 +25,7 @@ export default function KnowledgeCheckPanel({
         Quick Knowledge Check
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-        Select one answer to continue.
+        Select one answer. If it is not correct, we will pause and review it before continuing.
       </Typography>
 
       <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: 'wrap', gap: 1 }}>

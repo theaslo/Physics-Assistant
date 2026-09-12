@@ -395,6 +395,35 @@ async def solve_problem(
                     if hitl_result:
                         effective_problem = str(hitl_result.get("original_problem", request.problem))
                         guidance_prefix = str(hitl_result.get("guidance", "")).strip()
+                        if hitl_result.get("status") == "remediation_required" or hitl_result.get("was_correct") is False:
+                            stage_started = time.perf_counter()
+                            hitl_payload = {
+                                "status": hitl_result.get("status", "remediation_required"),
+                                "check_id": hitl_result.get("check_id"),
+                                "agent_id": hitl_result.get("agent_id", agent_id),
+                                "concept_tag": hitl_result.get("concept_tag"),
+                                "was_correct": hitl_result.get("was_correct"),
+                                "confidence": hitl_result.get("confidence"),
+                                "threshold": hitl_result.get("threshold"),
+                                "guidance": guidance_prefix,
+                                "remediation": hitl_result.get("remediation"),
+                            }
+                            _append_perf_stage(api_trace_stages, "early_return_hitl_remediation", stage_started)
+                            api_trace = _finalize_perf_trace("api_route", api_trace_stages, request_started)
+                            performance_trace = _merge_performance_trace(api_trace=api_trace, hitl_trace=hitl_trace)
+                            _log_slow_trace(agent_id, request.user_id, performance_trace)
+                            return ProblemSolveResponse(
+                                success=True,
+                                agent_id=agent_id,
+                                problem=effective_problem,
+                                solution=guidance_prefix,
+                                hitl=hitl_payload,
+                                metadata={
+                                    "hitl": hitl_payload,
+                                    "framework": "strands",
+                                    "performance_trace": performance_trace,
+                                },
+                            )
                     else:
                         logger.error(
                             "HITL_GATE_FALLBACK: invalid/expired check_id provided; proceeding without gating. "
@@ -474,8 +503,9 @@ async def solve_problem(
         agent_trace = metadata.get("performance_trace") if isinstance(metadata.get("performance_trace"), dict) else None
         if hitl_result:
             metadata["hitl"] = {
-                "status": "answer_processed",
+                "status": hitl_result.get("status", "answer_processed"),
                 "check_id": hitl_result.get("check_id"),
+                "agent_id": hitl_result.get("agent_id", agent_id),
                 "concept_tag": hitl_result.get("concept_tag"),
                 "was_correct": hitl_result.get("was_correct"),
                 "confidence": hitl_result.get("confidence"),

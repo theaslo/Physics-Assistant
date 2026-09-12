@@ -320,20 +320,30 @@ class KnowledgeTransferGate:
         selected_feedback = str(distractor_feedback.get(selected, "")).strip()
 
         if was_correct:
+            status = "answer_processed"
+            remediation = None
             guidance = (
                 "Knowledge Check: Correct.\n"
                 f"{check['correct_feedback']}\n"
                 "Proceeding to the full solution."
             )
         else:
+            status = "remediation_required"
             pieces = [
                 "Knowledge Check: Not quite.",
             ]
             if selected_feedback:
                 pieces.append(selected_feedback)
             pieces.append(str(check["incorrect_feedback"]))
-            pieces.append("Proceeding to the full solution.")
+            pieces.append("")
+            pieces.append("Before we continue: do you understand why this answer is not correct?")
+            pieces.append('If you would like help, reply "next step" and I will guide you one step at a time.')
             guidance = "\n".join(pieces)
+            remediation = {
+                "prompt": "Do you understand why this answer is not correct?",
+                "next_step_prompt": 'Reply "next step" if you want the next step of the solution.',
+                "can_continue": False,
+            }
 
         stage_started = time.perf_counter()
         self._log_attempt(
@@ -347,7 +357,7 @@ class KnowledgeTransferGate:
         self._append_trace_stage(trace_stages, "attempt_logged", stage_started, was_correct=was_correct)
 
         response_payload = {
-            "status": "answer_processed",
+            "status": status,
             "check_id": check_id,
             "agent_id": check["agent_id"],
             "original_problem": check["problem"],
@@ -358,6 +368,8 @@ class KnowledgeTransferGate:
             "threshold": check["threshold"],
             "reason_tags": check["reason_tags"],
         }
+        if remediation:
+            response_payload["remediation"] = remediation
         stage_started = time.perf_counter()
         self._append_trace_stage(trace_stages, "guidance_prepared", stage_started, was_correct=was_correct)
         return response_payload, self._finalize_trace("process_answer", trace_stages, trace_started)

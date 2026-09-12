@@ -104,12 +104,87 @@ class HitlRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "remediation_required")
         self.assertFalse(result["was_correct"])
         self.assertIn("Knowledge Check: Not quite.", result["guidance"])
         self.assertIn("That inverts spring-constant dependence.", result["guidance"])
+        self.assertIn("do you understand why this answer is not correct", result["guidance"])
+        self.assertIn("next step", result["guidance"])
+        self.assertNotIn("Proceeding to the full solution.", result["guidance"])
+        self.assertEqual(result["remediation"]["can_continue"], False)
         self.assertEqual(len(self.logged_attempts), 1)
         self.assertFalse(self.logged_attempts[0]["was_correct"])
         self.assertEqual(self.logged_attempts[0]["selected_option_id"], "B")
+
+
+class HitlApiRouteRegressionTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        import main as api_main
+
+        self.api_main = api_main
+        self.original_gate = api_main.knowledge_transfer_gate
+        self.original_get_or_create_agent = api_main.get_or_create_agent
+
+    async def asyncTearDown(self) -> None:
+        self.api_main.knowledge_transfer_gate = self.original_gate
+        self.api_main.get_or_create_agent = self.original_get_or_create_agent
+
+    async def test_wrong_hitl_answer_returns_remediation_without_solver(self):
+        class StubGate:
+            def is_enabled_for(self, agent_id: str) -> bool:
+                return agent_id == "forces_agent"
+
+            def process_answer_with_trace(self, **kwargs: Any):
+                return (
+                    {
+                        "status": "remediation_required",
+                        "check_id": kwargs["check_id"],
+                        "agent_id": "forces_agent",
+                        "original_problem": "A spring stretches 0.2 m with k=50 N/m. Find the force.",
+                        "concept_tag": "hookes_law",
+                        "was_correct": False,
+                        "guidance": (
+                            "Knowledge Check: Not quite.\n"
+                            "Hooke's law is linear in displacement.\n\n"
+                            "Before we continue: do you understand why this answer is not correct?\n"
+                            'If you would like help, reply "next step" and I will guide you one step at a time.'
+                        ),
+                        "confidence": 0.9,
+                        "threshold": 0.7,
+                        "remediation": {
+                            "prompt": "Do you understand why this answer is not correct?",
+                            "next_step_prompt": 'Reply "next step" if you want the next step of the solution.',
+                            "can_continue": False,
+                        },
+                    },
+                    {"operation": "process_answer", "stages": []},
+                )
+
+        async def fail_get_or_create_agent(*args: Any, **kwargs: Any):
+            raise AssertionError("solver should not be created for incorrect HITL answers")
+
+        self.api_main.knowledge_transfer_gate = StubGate()
+        self.api_main.get_or_create_agent = fail_get_or_create_agent
+
+        response = await self.api_main.solve_problem(
+            "forces_agent",
+            self.api_main.ProblemSolveRequest(
+                problem="A spring stretches 0.2 m with k=50 N/m. Find the force.",
+                user_id="student-a",
+                context={
+                    "knowledge_transfer_response": {
+                        "check_id": "check-1",
+                        "selected_option_id": "B",
+                    }
+                },
+            ),
+        )
+
+        self.assertTrue(response.success)
+        self.assertEqual(response.hitl["status"], "remediation_required")
+        self.assertFalse(response.hitl["was_correct"])
+        self.assertIn("do you understand why this answer is not correct", response.solution)
+        self.assertIsNone(response.tools_used)
 
 
 if __name__ == "__main__":
