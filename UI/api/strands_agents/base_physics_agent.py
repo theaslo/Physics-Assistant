@@ -388,13 +388,12 @@ class StrandsPhysicsAgent(ABC):
             if (
                 self.agent_id == "kinematics_agent"
                 and expected_kinematics_tool in {"projectile_motion_2d", "projectile_velocity_animation"}
-                and self._is_diagram_request(problem)
             ):
                 fastpath_stage_started = time.perf_counter()
                 diagram = self._build_projectile_diagram_fallback(problem, expected_kinematics_tool)
                 self._append_perf_stage(
                     perf_stages,
-                    "kinematics_projectile_direct_diagram",
+                    "kinematics_projectile_direct_solution",
                     fastpath_stage_started,
                     recovered=bool(diagram),
                 )
@@ -1270,11 +1269,11 @@ class StrandsPhysicsAgent(ABC):
         }
 
     def _parse_projectile_launch(self, problem: str) -> Optional[Dict[str, float]]:
-        lower = problem.lower()
+        lower = problem.lower().replace("\u00b0", " degrees ")
 
         speed_patterns = [
-            r"(?:initial\s+speed|launch\s+speed|speed|v0|v_0)\s*(?:=|is|of|:)?\s*(-?\d+(?:\.\d+)?)\s*(?:m\s*/\s*s|mps|meters?\s+per\s+second)",
-            r"launched\s+at\s+(-?\d+(?:\.\d+)?)\s*(?:m\s*/\s*s|mps|meters?\s+per\s+second)",
+            r"(?:initial\s+speed|initial\s+velocity|launch\s+speed|launch\s+velocity|speed|velocity|v0|v_0)\s*(?:=|is|of|:)?\s*(-?\d+(?:\.\d+)?)\s*(?:m\s*/\s*s|mps|meters?\s+per\s+second)",
+            r"(?:launched|thrown|projected|fired)\s+(?:at|with)?\s*(-?\d+(?:\.\d+)?)\s*(?:m\s*/\s*s|mps|meters?\s+per\s+second)",
         ]
         angle_patterns = [
             r"(?:angle|theta|launch\s+angle)\s*(?:=|is|of|:)?\s*(-?\d+(?:\.\d+)?)\s*(?:degrees?|deg|degree)",
@@ -1288,7 +1287,7 @@ class StrandsPhysicsAgent(ABC):
 
         h0 = self._first_float_match(lower, [
             r"(?:h0|h_0|initial\s+height|height)\s*(?:=|is|of|:)?\s*(-?\d+(?:\.\d+)?)\s*m(?:\b|eter)",
-            r"from\s+(?:a\s+)?(-?\d+(?:\.\d+)?)\s*m(?:eter)?\s+(?:height|high|above)",
+            r"from\s+(?:a\s+)?(-?\d+(?:\.\d+)?)\s*m(?:eter)?(?:\s+(?:height|high|above))?",
         ])
         x0 = self._first_float_match(lower, [
             r"(?:x0|x_0|initial\s+x|initial\s+horizontal\s+position)\s*(?:=|is|of|:)?\s*(-?\d+(?:\.\d+)?)\s*m(?:\b|eter)",
@@ -1542,7 +1541,7 @@ class StrandsPhysicsAgent(ABC):
 
     def _infer_expected_kinematics_tool(self, problem: str) -> Optional[str]:
         """Infer the expected kinematics tool from the user prompt."""
-        lower = problem.lower()
+        lower = problem.lower().replace("\u00b0", " degrees ")
         if "relative motion" in lower:
             return "relative_motion_1d"
         if "free fall" in lower:
@@ -1550,6 +1549,11 @@ class StrandsPhysicsAgent(ABC):
         if "projectile" in lower and "animation" in lower and "velocity" in lower:
             return "projectile_velocity_animation"
         if "projectile" in lower:
+            return "projectile_motion_2d"
+        if (
+            any(keyword in lower for keyword in ("launched", "thrown", "projected", "fired"))
+            and any(keyword in lower for keyword in ("angle", "degrees", "deg", " at "))
+        ):
             return "projectile_motion_2d"
         if "motion graph" in lower or "x-t" in lower or "v-t" in lower or "a-t" in lower:
             return "motion_graphs"
