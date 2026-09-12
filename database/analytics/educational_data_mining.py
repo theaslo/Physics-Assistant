@@ -148,7 +148,7 @@ class EducationalDataMiner:
                            u.username, up.proficiency_score, up.problems_attempted, up.problems_solved
                     FROM interactions i
                     JOIN users u ON i.user_id = u.id
-                    LEFT JOIN user_progress up ON i.user_id = up.user_id AND i.agent_type = up.topic
+                    LEFT JOIN user_progress up ON i.user_id = up.user_id AND i.agent_type::text = up.topic
                     WHERE i.created_at >= $1
                     ORDER BY i.user_id, i.created_at
                 """, datetime.now() - timedelta(days=self.config['temporal_window_days']))
@@ -175,7 +175,11 @@ class EducationalDataMiner:
                         'timestamp': interaction['created_at'],
                         'execution_time_ms': interaction['execution_time_ms'],
                         'metadata': interaction['metadata'],
-                        'proficiency_score': interaction['proficiency_score']
+                        'proficiency_score': (
+                            float(interaction['proficiency_score'])
+                            if interaction['proficiency_score'] is not None
+                            else None
+                        )
                     })
                     
                     # Update profile
@@ -278,7 +282,8 @@ class EducationalDataMiner:
                     labels['success'].append(1 if interaction['success'] else 0)
                     
                     # Estimate mastery level
-                    proficiency = interaction.get('proficiency_score', 50) / 100.0
+                    proficiency_score = interaction.get('proficiency_score')
+                    proficiency = float(proficiency_score if proficiency_score is not None else 50.0) / 100.0
                     labels['mastery'].append(1 if proficiency > 0.7 else 0)
             
             return np.array(features), labels

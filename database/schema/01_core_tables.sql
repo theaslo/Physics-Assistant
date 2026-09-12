@@ -11,7 +11,19 @@ CREATE TYPE user_role AS ENUM ('student', 'instructor', 'admin');
 CREATE TYPE session_status AS ENUM ('active', 'expired', 'terminated');
 CREATE TYPE interaction_type AS ENUM ('chat', 'mcp_tool', 'agent_call', 'file_upload', 'calculation');
 CREATE TYPE message_type AS ENUM ('user', 'assistant', 'system', 'error');
-CREATE TYPE agent_type AS ENUM ('kinematics', 'forces', 'energy', 'momentum', 'angular_motion', 'math_helper');
+CREATE TYPE agent_type AS ENUM (
+    'kinematics',
+    'forces',
+    'energy',
+    'momentum',
+    'angular_motion',
+    'math_helper',
+    'thermodynamics',
+    'waves',
+    'electromagnetism',
+    'optics',
+    'modern_physics'
+);
 
 -- Users table - Core user management
 CREATE TABLE users (

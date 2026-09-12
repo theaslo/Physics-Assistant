@@ -85,6 +85,7 @@ Available MCP tools:
 - constant_acceleration_1d: Motion with constant acceleration
 - free_fall_motion: Objects under gravity
 - projectile_motion_2d: 2D projectile problems
+- projectile_velocity_animation: Projectile frames with velocity vectors
 - motion_graphs: Analyze motion from graphs
 - relative_motion_1d: Relative velocity problems
 

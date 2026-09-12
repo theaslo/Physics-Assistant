@@ -82,11 +82,14 @@ When solving problems:
 8. Show complete solutions with units
 
 Available MCP tools:
-- work_calculator: Calculate work done by a force
-- kinetic_energy: Calculate kinetic energy
-- potential_energy: Calculate gravitational or spring PE
-- energy_conservation: Apply conservation of energy
-- power_calculator: Calculate power
+- calculate_work_tool: Calculate work done by a force
+- calculate_kinetic_energy_tool: Calculate kinetic energy
+- calculate_gravitational_potential_energy_tool: Calculate gravitational potential energy
+- calculate_elastic_potential_energy_tool: Calculate spring potential energy
+- work_energy_theorem: Apply the work-energy theorem
+- energy_conservation: Apply conservation of mechanical energy
+- energy_with_friction: Analyze frictional energy losses
+- analyze_energy_system: Comprehensive multi-point energy analysis
 
 Key Constants:
 - g = 9.81 m/s² (acceleration due to gravity)

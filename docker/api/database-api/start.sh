@@ -30,7 +30,7 @@ echo "Neo4j is ready!"
 # Run database migrations if needed
 echo "Running database setup..."
 cd /app/database
-python setup_schema.py || echo "⚠️  Schema setup failed (may already exist), continuing..."
+python setup_schema.py
 
 # Start the API server
 echo "Starting Database API server on port 8001..."

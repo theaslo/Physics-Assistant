@@ -33,6 +33,15 @@ def serve(host, port, transport):
     
     mcp = FastMCP(NAME, stateless_http=False)
 
+    def with_diagram_payload(result_text: str, payload: Dict) -> str:
+        """Append machine-readable diagram payload for downstream UI rendering."""
+        return (
+            f"{result_text}\n\n"
+            "DIAGRAM_JSON_START\n"
+            f"{json.dumps(payload)}\n"
+            "DIAGRAM_JSON_END"
+        )
+
 
     @mcp.tool()
     async def calculate_kinetic_energy_tool(mass: float, velocity: float) -> str:
@@ -284,7 +293,21 @@ def serve(host, port, transport):
     - Braking work: negative (removes kinetic energy)
     """
             
-            return result
+            payload = {
+                "type": "work_area_under_curve",
+                "title": "Work as Area Under F_parallel vs x",
+                "force_n": force,
+                "displacement_m": displacement,
+                "angle_deg": angle_degrees,
+                "force_parallel_n": force_parallel,
+                "force_perpendicular_n": force_perpendicular,
+                "work_j": work,
+                "area_points": [
+                    {"x_m": 0.0, "f_parallel_n": force_parallel},
+                    {"x_m": displacement, "f_parallel_n": force_parallel},
+                ],
+            }
+            return with_diagram_payload(result, payload)
             
         except Exception as e:
             return f"Error in work calculation: {str(e)}"
@@ -322,6 +345,12 @@ def serve(host, port, transport):
 
     """
             
+            mass = float(data.get("mass", 1.0))
+            ke_i = 0.0
+            ke_f = 0.0
+            work_net = 0.0
+            vi = float(data.get("initial_velocity", 0.0))
+            vf = float(data.get("final_velocity", 0.0)) if "final_velocity" in data else 0.0
             if "mass" in data:
                 mass = data["mass"]
                 
@@ -412,7 +441,29 @@ def serve(host, port, transport):
     - Non-conservative forces: irreversibly change mechanical energy
     """
             
-            return result
+            payload = {
+                "type": "before_after_energy_snapshot",
+                "title": "Work-Energy Theorem Snapshot",
+                "initial": {
+                    "kinetic_j": ke_i,
+                    "potential_j": 0.0,
+                    "elastic_j": 0.0,
+                    "total_j": ke_i,
+                    "velocity_mps": vi,
+                },
+                "final": {
+                    "kinetic_j": ke_f,
+                    "potential_j": 0.0,
+                    "elastic_j": 0.0,
+                    "total_j": ke_f,
+                    "velocity_mps": vf,
+                },
+                "delta": {
+                    "work_net_j": work_net,
+                    "delta_ke_j": ke_f - ke_i,
+                },
+            }
+            return with_diagram_payload(result, payload)
             
         except Exception as e:
             return f"Error in work-energy theorem analysis: {str(e)}"
@@ -455,6 +506,9 @@ def serve(host, port, transport):
             
             # Calculate initial energy
             initial_energy = 0
+            ke_i = 0.0
+            pe_grav_i = 0.0
+            pe_elastic_i = 0.0
             result += f"Initial Energy Components:\n"
             
             if "initial_velocity" in data:
@@ -482,6 +536,9 @@ def serve(host, port, transport):
             
             # Calculate final energy
             final_energy = 0
+            ke_f = 0.0
+            pe_grav_f = 0.0
+            pe_elastic_f = 0.0
             result += f"Final Energy Components:\n"
             
             if "final_velocity" in data:
@@ -590,7 +647,25 @@ def serve(host, port, transport):
     - Inelastic collisions lose mechanical energy
     """
             
-            return result
+            payload = {
+                "type": "energy_bar_chart",
+                "title": "Energy Conservation Components",
+                "initial": {
+                    "kinetic_j": ke_i,
+                    "potential_j": pe_grav_i,
+                    "elastic_j": pe_elastic_i,
+                    "total_j": initial_energy,
+                },
+                "final": {
+                    "kinetic_j": ke_f,
+                    "potential_j": pe_grav_f,
+                    "elastic_j": pe_elastic_f,
+                    "total_j": final_energy,
+                },
+                "difference_j": initial_energy - final_energy,
+                "conserved": abs(initial_energy - final_energy) < 0.01,
+            }
+            return with_diagram_payload(result, payload)
             
         except Exception as e:
             return f"Error in energy conservation analysis: {str(e)}"
@@ -776,7 +851,16 @@ def serve(host, port, transport):
     - Heat dissipation: cooling systems for high-friction applications
     """
             
-            return result
+            payload = {
+                "type": "energy_flow_diagram",
+                "title": "Energy Flow with Friction",
+                "initial_mechanical_j": initial_energy,
+                "final_mechanical_j": final_energy,
+                "friction_work_j": friction_work,
+                "dissipated_j": max(0.0, energy_dissipated),
+                "efficiency_percent": (final_energy / initial_energy) * 100 if initial_energy > 0 else 0.0,
+            }
+            return with_diagram_payload(result, payload)
             
         except Exception as e:
             return f"Error in friction energy analysis: {str(e)}"
@@ -819,6 +903,8 @@ def serve(host, port, transport):
     Mass: {mass:.1f} kg
     """
             
+            chart_points: List[Dict[str, float]] = []
+
             if "track_points" in data:
                 points = data["track_points"]
                 friction_coeff = data.get("friction_coefficient", 0)
@@ -876,6 +962,16 @@ def serve(host, port, transport):
                                 total_energy = pe
                                 result += f"⚠ Point {i+1}: Insufficient energy to reach height {height:.1f} m\n"
                     
+                    chart_points.append(
+                        {
+                            "point_index": float(i + 1),
+                            "height_m": float(height),
+                            "velocity_mps": float(velocity),
+                            "potential_j": float(pe),
+                            "kinetic_j": float(ke),
+                            "total_j": float(total_energy),
+                        }
+                    )
                     result += f"Point {i+1:<3} {height:<8.1f} {pe:<12.1f} {ke:<12.1f} {velocity:<10.2f} {total_energy:<12.1f}\n"
                 
                 result += f"\nEnergy Summary:\n"
@@ -953,7 +1049,13 @@ def serve(host, port, transport):
     - Compressed air systems: elastic PE for energy storage
     """
             
-            return result
+            payload = {
+                "type": "before_after_energy_snapshot",
+                "title": "System Energy Snapshot",
+                "scenario": scenario,
+                "points": chart_points,
+            }
+            return with_diagram_payload(result, payload)
             
         except Exception as e:
             return f"Error in energy system analysis: {str(e)}"

@@ -133,6 +133,22 @@ class InteractionResponse(BaseModel):
     timestamp: datetime
     status: str = "success"
 
+
+class KnowledgeTransferAttemptRequest(BaseModel):
+    """Request model for logging HITL knowledge-transfer attempts."""
+    user_identifier: str = Field(..., description="Student identifier (username or UUID)")
+    session_identifier: Optional[str] = Field(default=None, description="Session identifier")
+    class_identifier: Optional[str] = Field(default=None, description="Class or cohort identifier")
+    agent_type: str = Field(..., description="Agent type, e.g. forces or kinematics")
+    concept_tag: str = Field(..., description="Concept tag used by the HITL gate")
+    question_id: Optional[str] = Field(default=None, description="Knowledge question UUID if available")
+    check_id: str = Field(..., description="HITL check identifier")
+    confidence_score: Optional[float] = Field(default=None, description="Combined confidence score")
+    threshold_score: Optional[float] = Field(default=None, description="Gate threshold used")
+    selected_option_id: str = Field(..., description="Selected option id")
+    was_correct: bool = Field(..., description="Whether the selected option was correct")
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
 class SessionRequest(BaseModel):
     """Request model for creating sessions"""
     user_id: str = Field(..., description="User identifier")
@@ -272,6 +288,18 @@ async def get_db() -> DatabaseManager:
         raise HTTPException(status_code=503, detail="Database not available")
     return db_manager
 
+
+def normalize_agent_type(agent_type: str) -> str:
+    """Normalize incoming agent identifiers to database enum values."""
+    value = (agent_type or "").strip().lower()
+    if value.startswith("physics_"):
+        value = value[len("physics_"):]
+    if value.endswith("_agent"):
+        value = value[:-6]
+    if value == "math":
+        return "math_helper"
+    return value
+
 # Health check endpoints
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
@@ -337,16 +365,31 @@ async def log_interaction(
 ):
     """Log a student interaction with physics agents"""
     try:
-        # Validate user exists (optional - could be removed for performance)
+        resolved_user_id = interaction.user_id
+        agent_type_norm = normalize_agent_type(interaction.agent_type)
+
+        # Resolve user identifier to UUID if possible.
         async with db.postgres.get_connection() as conn:
-            user_exists = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)", interaction.user_id)
-            if not user_exists:
-                raise HTTPException(status_code=404, detail="User not found")
+            try:
+                user_uuid = str(uuid.UUID(interaction.user_id))
+                user_exists = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)", user_uuid)
+                if not user_exists:
+                    raise HTTPException(status_code=404, detail="User not found")
+                resolved_user_id = user_uuid
+            except ValueError:
+                user_row = await conn.fetchrow(
+                    "SELECT id FROM users WHERE username = $1 OR email = $1 LIMIT 1",
+                    interaction.user_id
+                )
+                if user_row:
+                    resolved_user_id = str(user_row["id"])
+                else:
+                    raise HTTPException(status_code=404, detail="User not found")
         
         # Log the interaction
         interaction_id = await db.log_interaction(
-            user_id=interaction.user_id,
-            agent_type=interaction.agent_type,
+            user_id=resolved_user_id,
+            agent_type=agent_type_norm,
             message=interaction.message,
             response=interaction.response,
             session_id=interaction.session_id,
@@ -355,30 +398,30 @@ async def log_interaction(
         
         # Record metrics for monitoring
         INTERACTION_COUNT.labels(
-            agent_type=interaction.agent_type, 
+            agent_type=agent_type_norm,
             success="true"
         ).inc()
         
         if interaction.execution_time_ms:
             execution_seconds = interaction.execution_time_ms / 1000
-            AGENT_EXECUTION_TIME.labels(agent_type=interaction.agent_type).observe(execution_seconds)
+            AGENT_EXECUTION_TIME.labels(agent_type=agent_type_norm).observe(execution_seconds)
         
         # Submit real-time analytics event
         if realtime_engine:
             background_tasks.add_task(
                 submit_realtime_event,
-                interaction.user_id,
-                interaction.agent_type,
+                resolved_user_id,
+                agent_type_norm,
                 True,  # success
                 interaction.execution_time_ms
             )
         
         # Optionally cache frequently accessed data in background
-        if interaction.agent_type:
+        if agent_type_norm:
             background_tasks.add_task(
                 cache_agent_stats, 
                 db, 
-                interaction.agent_type
+                agent_type_norm
             )
         
         return InteractionResponse(
@@ -390,18 +433,28 @@ async def log_interaction(
     except HTTPException:
         # Record failed interaction metric
         INTERACTION_COUNT.labels(
-            agent_type=interaction.agent_type, 
+            agent_type=normalize_agent_type(interaction.agent_type),
             success="false"
         ).inc()
         raise
     except Exception as e:
         # Record failed interaction metric
         INTERACTION_COUNT.labels(
-            agent_type=interaction.agent_type, 
+            agent_type=normalize_agent_type(interaction.agent_type),
             success="false"
         ).inc()
         logger.error(f"Failed to log interaction: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to log interaction: {str(e)}")
+
+
+@app.post("/interactions/log", response_model=InteractionResponse, tags=["Interactions"])
+async def log_interaction_compat(
+    interaction: InteractionRequest,
+    background_tasks: BackgroundTasks,
+    db: DatabaseManager = Depends(get_db)
+):
+    """Compatibility alias used by legacy agent logging clients."""
+    return await log_interaction(interaction=interaction, background_tasks=background_tasks, db=db)
 
 @app.get("/interactions", tags=["Interactions"])
 async def get_interactions(
@@ -471,6 +524,236 @@ async def get_interactions(
         
     except Exception as e:
         logger.error(f"Failed to retrieve interactions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# HITL Knowledge Transfer endpoints
+
+@app.get("/knowledge-transfer/questions/pick", tags=["Knowledge Transfer"])
+async def pick_knowledge_transfer_question(
+    agent_type: str,
+    concept_tag: Optional[str] = None,
+    db: DatabaseManager = Depends(get_db),
+):
+    """Pick one active curated HITL question by agent and optional concept."""
+    try:
+        normalized_agent = normalize_agent_type(agent_type)
+        query = """
+            SELECT id, agent_type, concept_tag, question_text, options,
+                   explanation_correct, explanation_incorrect, difficulty, metadata
+            FROM knowledge_transfer_guidance
+            WHERE active = TRUE
+              AND agent_type = $1::agent_type
+        """
+        params: List[Any] = [normalized_agent]
+        if concept_tag:
+            query += " AND concept_tag = $2"
+            params.append(concept_tag)
+        query += " ORDER BY random() LIMIT 1"
+
+        async with db.postgres.get_connection() as conn:
+            row = await conn.fetchrow(query, *params)
+
+        if not row:
+            raise HTTPException(status_code=404, detail="No active knowledge-transfer question found")
+
+        options = row["options"] or []
+        if isinstance(options, str):
+            try:
+                options = json.loads(options)
+            except json.JSONDecodeError:
+                options = []
+        if not isinstance(options, list):
+            options = []
+
+        metadata = row["metadata"] or {}
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except json.JSONDecodeError:
+                metadata = {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+
+        correct_option_id = None
+        distractor_feedback = {}
+        frontend_options = []
+        for opt in options:
+            if not isinstance(opt, dict):
+                continue
+            opt_id = str(opt.get("id", "")).strip()
+            opt_text = str(opt.get("text", "")).strip()
+            is_correct = bool(opt.get("is_correct", False))
+            feedback = str(opt.get("feedback", "")).strip()
+            if not opt_id or not opt_text:
+                continue
+            frontend_options.append({"id": opt_id, "text": opt_text})
+            if is_correct:
+                correct_option_id = opt_id
+            elif feedback:
+                distractor_feedback[opt_id] = feedback
+
+        if not correct_option_id:
+            raise HTTPException(status_code=500, detail="Question options missing correct answer metadata")
+
+        return {
+            "question_id": str(row["id"]),
+            "agent_type": str(row["agent_type"]),
+            "concept_tag": row["concept_tag"],
+            "question": row["question_text"],
+            "options": frontend_options,
+            "correct_option_id": correct_option_id,
+            "correct_feedback": row["explanation_correct"],
+            "incorrect_feedback": row["explanation_incorrect"],
+            "distractor_feedback": distractor_feedback,
+            "difficulty": row["difficulty"],
+            "metadata": metadata,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to pick knowledge-transfer question: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/knowledge-transfer/attempts", tags=["Knowledge Transfer"])
+async def log_knowledge_transfer_attempt(
+    attempt: KnowledgeTransferAttemptRequest,
+    db: DatabaseManager = Depends(get_db),
+):
+    """Store one-shot HITL attempt result for student success analytics."""
+    try:
+        normalized_agent = normalize_agent_type(attempt.agent_type)
+        query = """
+            INSERT INTO knowledge_transfer_attempts (
+                check_id, user_identifier, session_identifier, class_identifier,
+                agent_type, concept_tag, question_id, confidence_score, threshold_score,
+                selected_option_id, was_correct, metadata
+            )
+            VALUES (
+                $1, $2, $3, $4, $5::agent_type, $6, $7, $8, $9, $10, $11, $12
+            )
+            RETURNING id, created_at
+        """
+        question_uuid = None
+        if attempt.question_id:
+            try:
+                question_uuid = uuid.UUID(attempt.question_id)
+            except ValueError:
+                question_uuid = None
+
+        async with db.postgres.get_connection() as conn:
+            row = await conn.fetchrow(
+                query,
+                attempt.check_id,
+                attempt.user_identifier,
+                attempt.session_identifier,
+                attempt.class_identifier,
+                normalized_agent,
+                attempt.concept_tag,
+                question_uuid,
+                attempt.confidence_score,
+                attempt.threshold_score,
+                attempt.selected_option_id,
+                attempt.was_correct,
+                json.dumps(attempt.metadata or {}),
+            )
+
+        return {
+            "attempt_id": str(row["id"]),
+            "created_at": row["created_at"].isoformat(),
+            "status": "success",
+        }
+    except Exception as e:
+        logger.error(f"Failed to log knowledge-transfer attempt: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/knowledge-transfer/attempts/aggregate", tags=["Knowledge Transfer"])
+async def aggregate_knowledge_transfer_attempts(
+    user_identifier: Optional[str] = None,
+    class_identifier: Optional[str] = None,
+    agent_type: Optional[str] = None,
+    days: int = 30,
+    db: DatabaseManager = Depends(get_db),
+):
+    """Aggregate HITL performance for one student or cohort/class."""
+    try:
+        since_date = datetime.now() - timedelta(days=days)
+        clauses = ["created_at >= $1"]
+        params: List[Any] = [since_date]
+        param_idx = 1
+
+        if user_identifier:
+            param_idx += 1
+            clauses.append(f"user_identifier = ${param_idx}")
+            params.append(user_identifier)
+        if class_identifier:
+            param_idx += 1
+            clauses.append(f"class_identifier = ${param_idx}")
+            params.append(class_identifier)
+        if agent_type:
+            param_idx += 1
+            clauses.append(f"agent_type = ${param_idx}::agent_type")
+            params.append(normalize_agent_type(agent_type))
+
+        where_sql = " AND ".join(clauses)
+        summary_query = f"""
+            SELECT
+                COUNT(*)::int AS total_attempts,
+                SUM(CASE WHEN was_correct THEN 1 ELSE 0 END)::int AS total_correct,
+                COUNT(DISTINCT user_identifier)::int AS distinct_students
+            FROM knowledge_transfer_attempts
+            WHERE {where_sql}
+        """
+
+        by_concept_query = f"""
+            SELECT
+                concept_tag,
+                COUNT(*)::int AS attempts,
+                SUM(CASE WHEN was_correct THEN 1 ELSE 0 END)::int AS correct
+            FROM knowledge_transfer_attempts
+            WHERE {where_sql}
+            GROUP BY concept_tag
+            ORDER BY attempts DESC, concept_tag
+        """
+
+        async with db.postgres.get_connection() as conn:
+            summary = await conn.fetchrow(summary_query, *params)
+            concept_rows = await conn.fetch(by_concept_query, *params)
+
+        total_attempts = int(summary["total_attempts"] or 0)
+        total_correct = int(summary["total_correct"] or 0)
+        accuracy = (total_correct / total_attempts) if total_attempts > 0 else 0.0
+
+        by_concept = []
+        for row in concept_rows:
+            attempts = int(row["attempts"] or 0)
+            correct = int(row["correct"] or 0)
+            by_concept.append({
+                "concept_tag": row["concept_tag"],
+                "attempts": attempts,
+                "correct": correct,
+                "accuracy": (correct / attempts) if attempts > 0 else 0.0,
+            })
+
+        return {
+            "filters": {
+                "user_identifier": user_identifier,
+                "class_identifier": class_identifier,
+                "agent_type": normalize_agent_type(agent_type) if agent_type else None,
+                "days": days,
+            },
+            "summary": {
+                "total_attempts": total_attempts,
+                "total_correct": total_correct,
+                "accuracy": accuracy,
+                "distinct_students": int(summary["distinct_students"] or 0),
+            },
+            "by_concept": by_concept,
+        }
+    except Exception as e:
+        logger.error(f"Failed to aggregate knowledge-transfer attempts: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Analytics endpoints

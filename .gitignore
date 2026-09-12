@@ -1,5 +1,22 @@
 .venv/
 __pycache__/
 
+# Local secrets and machine-specific state
+.env
+.env.*
+!.env.example
+.claude/
+.playwright-mcp/
+
+# Local screenshots and generated validation artifacts
+*.png
+Testing_*_Agent_Diagrams/
+Testing_Force_Diagrams/
+Testing_Kinematics_Diagrams/
+Testing_Energy_Agent_Diagrams/
+Testing_Momentum_Agent_Diagrams/
+Testing_Thermodynamics_Agent_Diagrams/
+Testing_Waves_Agent_Diagrams/
+
 # External repos - do not push
 strands_agent_github/

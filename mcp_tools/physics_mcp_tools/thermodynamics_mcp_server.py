@@ -23,6 +23,15 @@ def serve(host, port, transport):
     logger.info('Starting Thermodynamics MCP Server')
     mcp = FastMCP(NAME, stateless_http=False)
 
+    def with_diagram_payload(result_text: str, payload: dict) -> str:
+        """Append machine-readable payload for frontend thermodynamics diagrams."""
+        return (
+            f"{result_text}\n\n"
+            "DIAGRAM_JSON_START\n"
+            f"{json.dumps(payload)}\n"
+            "DIAGRAM_JSON_END"
+        )
+
     @mcp.tool()
     async def ideal_gas_law(gas_data: str) -> str:
         """
@@ -97,6 +106,34 @@ Ideal Gas Law Analysis (PV = nRT):
                 result += f"n = PV / (RT)\n"
                 result += f"n = ({P:.2f} × {V:.6f}) / ({R_UNIVERSAL} × {T:.2f})\n"
                 result += f"n = {n:.4f} mol\n"
+
+            if P is not None and V is not None and n is not None and T is not None:
+                max_p = max(1.0, P * 1.35)
+                max_v = max(1e-6, V * 1.35)
+                isotherms = []
+                for factor in [0.75, 1.0, 1.25]:
+                    iso_t = max(1.0, T * factor)
+                    curve = []
+                    for i in range(40):
+                        vol = max_v * (0.2 + 0.8 * i / 39)
+                        pressure = (n * R_UNIVERSAL * iso_t) / vol
+                        curve.append({"volume_m3": vol, "pressure_pa": pressure})
+                    isotherms.append({"temperature_k": iso_t, "points": curve})
+
+                payload = {
+                    "type": "pv_diagram",
+                    "title": "PV Diagram (Ideal Gas State)",
+                    "state": {
+                        "pressure_pa": P,
+                        "volume_m3": V,
+                        "moles": n,
+                        "temperature_k": T,
+                    },
+                    "pv_points": [{"label": "State", "pressure_pa": P, "volume_m3": V}],
+                    "isotherms": isotherms,
+                    "axis": {"max_pressure_pa": max_p, "max_volume_m3": max_v},
+                }
+                return with_diagram_payload(result, payload)
 
             return result
 
@@ -175,6 +212,24 @@ Common Specific Heat Values:
 - Copper: 385 J/(kg·K)
 - Iron: 450 J/(kg·K)
 """
+            if m is not None and c is not None and dT is not None and Q is not None:
+                steps = 48
+                q_points = []
+                for i in range(steps):
+                    frac = i / (steps - 1)
+                    q_points.append({"q_j": Q * frac, "delta_t_k": dT * frac})
+
+                payload = {
+                    "type": "heating_curve_plot",
+                    "title": "Heating Curve (Q vs ΔT)",
+                    "mass_kg": m,
+                    "specific_heat_j_per_kgk": c,
+                    "delta_t_k": dT,
+                    "heat_j": Q,
+                    "q_vs_delta_t": q_points,
+                }
+                return with_diagram_payload(result, payload)
+
             return result
 
         except Exception as e:
@@ -308,7 +363,19 @@ Common Thermal Conductivities:
 - Wood: 0.15 W/(m·K)
 - Styrofoam: 0.033 W/(m·K)
 """
-            return result
+            payload = {
+                "type": "heat_transfer_path_diagram",
+                "title": "Heat Conduction Path",
+                "conductivity_w_mk": k,
+                "area_m2": A,
+                "thickness_m": L,
+                "delta_t_k": dT,
+                "heat_rate_w": Q_rate,
+                "thermal_resistance_k_per_w": L / (k * A),
+                "hot_side_temp_c": dT,
+                "cold_side_temp_c": 0.0,
+            }
+            return with_diagram_payload(result, payload)
 
         except Exception as e:
             return f"Error in heat conduction calculation: {str(e)}"
@@ -373,7 +440,37 @@ Key Points:
 - Efficiency increases with larger temperature difference
 - Cannot achieve 100% efficiency (would need Tᶜ = 0 K)
 """
-            return result
+            cycle_points = [
+                {"label": "A", "v_norm": 0.25, "p_norm": 0.82},
+                {"label": "B", "v_norm": 0.62, "p_norm": 0.64},
+                {"label": "C", "v_norm": 0.78, "p_norm": 0.34},
+                {"label": "D", "v_norm": 0.36, "p_norm": 0.20},
+            ]
+            frame_order = [cycle_points[0], cycle_points[1], cycle_points[2], cycle_points[3], cycle_points[0]]
+            frames = []
+            total_steps = 32
+            for i in range(total_steps):
+                span = (len(frame_order) - 1) * i / (total_steps - 1)
+                seg = min(len(frame_order) - 2, int(math.floor(span)))
+                frac = span - seg
+                p0 = frame_order[seg]
+                p1 = frame_order[seg + 1]
+                v_norm = p0["v_norm"] + (p1["v_norm"] - p0["v_norm"]) * frac
+                p_norm = p0["p_norm"] + (p1["p_norm"] - p0["p_norm"]) * frac
+                frames.append({"step": i, "v_norm": v_norm, "p_norm": p_norm})
+
+            payload = {
+                "type": "carnot_cycle_animation",
+                "title": "Carnot Cycle (Normalized PV Plane)",
+                "t_hot_k": T_hot,
+                "t_cold_k": T_cold,
+                "efficiency": efficiency,
+                "efficiency_percent": efficiency * 100.0,
+                "q_hot_j": Q_hot,
+                "cycle_points": cycle_points,
+                "frames": frames,
+            }
+            return with_diagram_payload(result, payload)
 
         except Exception as e:
             return f"Error in Carnot efficiency calculation: {str(e)}"

@@ -1,5 +1,5 @@
 # type: ignore
-from typing import Any
+from typing import Any, Dict
 import math
 import json
 
@@ -44,6 +44,14 @@ def serve(host, port, transport):
         else:
             logger.warning("Database API not available - running without logging")
 
+    def with_diagram_payload(result_text: str, payload: Dict) -> str:
+        """Append machine-readable diagram payload for downstream UI rendering."""
+        return (
+            f"{result_text}\n\n"
+            "DIAGRAM_JSON_START\n"
+            f"{json.dumps(payload)}\n"
+            "DIAGRAM_JSON_END"
+        )
 
 
     @mcp.tool()
@@ -423,6 +431,7 @@ def serve(host, port, transport):
     #         return f'Error: {str(e)}\nExpected format: {{"h0": 100, "v0": 0, "t": 4}}'
  
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "free_fall_motion")
     async def free_fall_motion(known_values: str, gravity: float = 9.81) -> str:
         """Analyze free fall motion (special case of constant acceleration).
         
@@ -604,12 +613,44 @@ def serve(host, port, transport):
             if h is not None and h <= 0 and v is not None:
                 result.append(f"- Impact velocity: {abs(v):.2f} m/s")
             
-            return "\n".join(result)
+            result_text = "\n".join(result)
+
+            timeline_points = []
+            if t is not None:
+                sample_count = 7
+                for i in range(sample_count + 1):
+                    ts = (t * i) / sample_count if sample_count > 0 else 0.0
+                    hs = (h0 if h0 is not None else 0.0) + v0 * ts + 0.5 * a * ts * ts
+                    vs = v0 + a * ts
+                    timeline_points.append(
+                        {
+                            "t_s": float(ts),
+                            "h_m": float(hs),
+                            "v_mps": float(vs),
+                        }
+                    )
+
+            payload = {
+                "type": "free_fall_timeline",
+                "title": "Free Fall Timeline",
+                "gravity_mps2": float(gravity),
+                "h0_m": float(h0 if h0 is not None else 0.0),
+                "v0_mps": float(v0),
+                "final_h_m": float(h if h is not None else 0.0),
+                "final_v_mps": float(v if v is not None else 0.0),
+                "total_time_s": float(t if t is not None else 0.0),
+                "max_height_m": float(max_height) if max_height is not None else None,
+                "time_to_max_s": float(time_to_max) if time_to_max is not None else None,
+                "timeline_points": timeline_points,
+            }
+
+            return with_diagram_payload(result_text, payload)
             
         except (json.JSONDecodeError, KeyError, ValueError, ZeroDivisionError) as e:
             return f'Error: {str(e)}\nExpected format: {{"h0": 100, "v0": 0, "t": 4}}'
         
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "projectile_motion_2d")
     async def projectile_motion_2d(launch_conditions: str, target_info: str = None) -> str:
         """Analyze 2D projectile motion.
         
@@ -695,6 +736,8 @@ def serve(host, port, transport):
             else:
                 t_flight = None
                 
+            x_range = None
+            impact_speed = None
             if t_flight is not None:
                 # Range and impact conditions
                 x_range = x0 + v0x * t_flight
@@ -755,12 +798,142 @@ def serve(host, port, transport):
                 result += f"\n- Total range: {x_range - x0:.2f} m"
                 result += f"\n- Impact speed: {impact_speed:.2f} m/s"
                 
-            return result
+            result_text = result
+
+            max_t = t_flight if t_flight is not None else 4.0
+            max_t = max(0.5, min(max_t, 20.0))
+            samples = []
+            steps = 24
+            for i in range(steps + 1):
+                ts = (max_t * i) / steps
+                xs = x0 + v0x * ts
+                ys = h0 + v0y * ts - 0.5 * gravity * ts * ts
+                if ys < 0:
+                    ys = 0.0
+                samples.append({"t_s": float(ts), "x_m": float(xs), "y_m": float(ys)})
+
+            payload = {
+                "type": "projectile_trajectory",
+                "title": "Projectile Trajectory",
+                "launch": {
+                    "v0_mps": float(v0),
+                    "angle_deg": float(angle_deg),
+                    "h0_m": float(h0),
+                    "x0_m": float(x0),
+                },
+                "gravity_mps2": float(gravity),
+                "v0x_mps": float(v0x),
+                "v0y_mps": float(v0y),
+                "max_height_m": float(max_height),
+                "time_to_max_s": float(t_max_height),
+                "flight_time_s": float(t_flight) if t_flight is not None else None,
+                "range_m": float((x_range - x0)) if x_range is not None else None,
+                "impact_speed_mps": float(impact_speed) if impact_speed is not None else None,
+                "trajectory_points": samples,
+            }
+            return with_diagram_payload(result_text, payload)
             
         except (json.JSONDecodeError, KeyError, ValueError, ZeroDivisionError) as e:
             return f'Error: {str(e)}\nExpected format: {{"v0": 50, "angle": 45, "h0": 10}}'
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "projectile_velocity_animation")
+    async def projectile_velocity_animation(launch_conditions: str, frames: int = 18) -> str:
+        """Generate time-stepped projectile velocity vectors for animation.
+
+        Args:
+            launch_conditions: JSON string with launch parameters.
+                Example: '{"v0": 30, "angle": 45, "h0": 2}'
+            frames: Number of animation frames (default: 18)
+
+        Returns:
+            str: Projectile summary plus animation payload
+        """
+        try:
+            launch_data = json.loads(launch_conditions)
+
+            v0 = float(launch_data['v0'])
+            angle_deg = float(launch_data['angle'])
+            h0 = float(launch_data.get('h0', 0.0))
+            x0 = float(launch_data.get('x0', 0.0))
+            gravity = float(launch_data.get('gravity', 9.81))
+
+            angle_rad = degrees_to_radians(angle_deg)
+            v0x = v0 * math.cos(angle_rad)
+            v0y = v0 * math.sin(angle_rad)
+
+            # Solve y(t)=0 to estimate flight duration
+            A, B, C = 0.5 * gravity, -v0y, -h0
+            t1, t2 = solve_quadratic(A, B, C)
+            t_candidates = [t for t in [t1, t2] if t is not None and t > 0]
+            t_flight = max(t_candidates) if t_candidates else max(2.0, (2.0 * max(v0y, 0.0) / gravity))
+
+            frame_count = max(8, min(int(frames), 60))
+            frame_data = []
+            max_speed = 0.0
+
+            for i in range(frame_count + 1):
+                t = (t_flight * i) / frame_count
+                x = x0 + v0x * t
+                y = h0 + v0y * t - 0.5 * gravity * t * t
+                if y < 0:
+                    y = 0.0
+                vx = v0x
+                vy = v0y - gravity * t
+                speed = math.sqrt(vx * vx + vy * vy)
+                max_speed = max(max_speed, speed)
+                frame_data.append(
+                    {
+                        "t_s": float(t),
+                        "x_m": float(x),
+                        "y_m": float(y),
+                        "vx_mps": float(vx),
+                        "vy_mps": float(vy),
+                        "speed_mps": float(speed),
+                    }
+                )
+
+            result = f"""
+    Projectile Velocity Animation Data:
+    ==================================
+
+    Launch Conditions:
+    - Initial speed (v₀): {v0:.2f} m/s
+    - Launch angle (θ): {angle_deg:.1f}°
+    - Initial height (h₀): {h0:.2f} m
+    - Gravity (g): {gravity:.2f} m/s²
+
+    Components:
+    - v₀ₓ = {v0x:.2f} m/s
+    - v₀ᵧ = {v0y:.2f} m/s
+
+    Animation Range:
+    - Estimated flight time: {t_flight:.2f} s
+    - Frames generated: {frame_count + 1}
+    - Max speed in sequence: {max_speed:.2f} m/s
+    """
+
+            payload = {
+                "type": "projectile_velocity_animation",
+                "title": "Projectile Velocity Animation",
+                "launch": {
+                    "v0_mps": float(v0),
+                    "angle_deg": float(angle_deg),
+                    "h0_m": float(h0),
+                    "x0_m": float(x0),
+                },
+                "gravity_mps2": float(gravity),
+                "flight_time_s": float(t_flight),
+                "frames": frame_data,
+            }
+
+            return with_diagram_payload(result, payload)
+
+        except (json.JSONDecodeError, KeyError, ValueError, ZeroDivisionError) as e:
+            return f'Error: {str(e)}\nExpected format: {{"v0": 30, "angle": 45, "h0": 2}}'
+
+    @mcp.tool()
+    @create_tool_wrapper(db_logger, "motion_graphs")
     async def motion_graphs(motion_type: str, parameters: str, time_range: str = "0,10,0.5") -> str:
         """Generate position, velocity, and acceleration vs time data for graphing.
         
@@ -792,6 +965,10 @@ def serve(host, port, transport):
                 times.append(t)
                 t += t_step
                 
+            x_series = []
+            v_series = []
+            a_series = []
+
             if motion_type == "uniform":
                 x0 = params.get('x0', 0)
                 v = params['v']
@@ -803,6 +980,9 @@ def serve(host, port, transport):
                 for t in times:
                     x = x0 + v * t
                     result += f"{t:<8.1f} {x:<12.2f} {v:<14.2f} {0.0:<16.2f}\n"
+                    x_series.append(float(x))
+                    v_series.append(float(v))
+                    a_series.append(0.0)
                     
             elif motion_type == "constant_acceleration":
                 x0 = params.get('x0', 0)
@@ -817,6 +997,9 @@ def serve(host, port, transport):
                     x = x0 + v0 * t + 0.5 * a * t**2
                     v = v0 + a * t
                     result += f"{t:<8.1f} {x:<12.2f} {v:<14.2f} {a:<16.2f}\n"
+                    x_series.append(float(x))
+                    v_series.append(float(v))
+                    a_series.append(float(a))
                     
             elif motion_type == "projectile":
                 x0 = params.get('x0', 0)
@@ -844,6 +1027,9 @@ def serve(host, port, transport):
                     # Only show data while projectile is above ground
                     if y >= 0:
                         result += f"{t:<8.1f} {x:<10.2f} {y:<10.2f} {vx:<10.2f} {vy:<10.2f} {speed:<12.2f}\n"
+                        x_series.append(float(y))
+                        v_series.append(float(speed))
+                        a_series.append(float(g))
                     else:
                         break
             else:
@@ -856,12 +1042,22 @@ def serve(host, port, transport):
             result += f"- Slope of position graph = velocity\n"
             result += f"- Slope of velocity graph = acceleration"
             
-            return result
+            payload = {
+                "type": "motion_graphs_plot",
+                "title": "Motion Graphs",
+                "motion_type": motion_type,
+                "times_s": [float(t) for t in times[:len(x_series)]],
+                "position_series": x_series,
+                "velocity_series": v_series,
+                "acceleration_series": a_series,
+            }
+            return with_diagram_payload(result, payload)
             
         except (json.JSONDecodeError, ValueError) as e:
             return f'Error: {str(e)}\nCheck parameters and time_range format'
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "relative_motion_1d")
     async def relative_motion_1d(objects_data: str) -> str:
         """Analyze relative motion between two objects in 1D.
         
@@ -913,6 +1109,8 @@ def serve(host, port, transport):
             result += f"- Relative velocity (v₁ - v₂): {v_rel:.2f} m/s\n"
             
             # Determine if objects will meet
+            t_meet = None
+            x_meet = None
             if abs(v_rel) < 0.001:  # Essentially zero relative velocity
                 if abs(x1_0 - x2_0) < 0.001:
                     result += f"- Objects are moving together (same position and velocity)\n"
@@ -975,7 +1173,28 @@ def serve(host, port, transport):
             else:
                 result += f"- Objects maintain constant relative position"
                 
-            return result
+            result_text = result
+            sample_times = [0.0, 1.0, 2.0, 5.0, 10.0]
+            if t_meet is not None and t_meet > 0:
+                sample_times.append(float(t_meet))
+            sample_times = sorted(set(sample_times))
+
+            obj1_points = []
+            obj2_points = []
+            for ts in sample_times:
+                obj1_points.append({"t_s": float(ts), "x_m": float(x1_0 + v1 * ts)})
+                obj2_points.append({"t_s": float(ts), "x_m": float(x2_0 + v2 * ts)})
+
+            payload = {
+                "type": "relative_motion_intersection",
+                "title": "Relative Motion (1D)",
+                "object1": {"x0_m": float(x1_0), "v_mps": float(v1), "points": obj1_points},
+                "object2": {"x0_m": float(x2_0), "v_mps": float(v2), "points": obj2_points},
+                "relative_velocity_mps": float(v_rel),
+                "meeting_time_s": float(t_meet) if t_meet is not None and t_meet >= 0 else None,
+                "meeting_position_m": float(x_meet) if x_meet is not None else None,
+            }
+            return with_diagram_payload(result_text, payload)
             
         except (json.JSONDecodeError, KeyError, ValueError, ZeroDivisionError) as e:
             return f'Error: {str(e)}\nExpected format: {{"object1": {{"x0": 0, "v": 20}}, "object2": {{"x0": 100, "v": -15}}}}'

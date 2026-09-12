@@ -5,11 +5,15 @@ All physics agents now use Strands SDK with MCP tools and Ollama LLM
 
 import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+import os
+
+from hitl_knowledge_transfer import KnowledgeTransferGate
 
 # Import all Strands-based agents
 from strands_agents import (
@@ -45,6 +49,7 @@ ALL_VALID_AGENTS = PHYSICS_101_AGENTS + PHYSICS_102_AGENTS + PHYSICS_201_AGENTS 
 
 # Global agent store for managing active agents (all Strands-based now)
 agent_store: Dict[str, StrandsPhysicsAgent] = {}
+knowledge_transfer_gate: Optional[KnowledgeTransferGate] = None
 
 # Pydantic models for API requests/responses
 class AgentCreateRequest(BaseModel):
@@ -99,6 +104,8 @@ class ProblemSolveResponse(BaseModel):
     reasoning: Optional[str] = None
     tools_used: Optional[list] = None
     execution_time_ms: Optional[int] = None
+    diagram: Optional[Dict[str, Any]] = None
+    hitl: Optional[Dict[str, Any]] = None
     metadata: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 
@@ -113,9 +120,19 @@ class AgentHealthResponse(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan"""
+    global knowledge_transfer_gate
     logger.info("🚀 Starting Physics Assistant API")
+    database_api_host = os.getenv("DATABASE_API_HOST", "localhost")
+    database_api_port = os.getenv("DATABASE_API_PORT", "8001")
+    database_api_url = f"http://{database_api_host}:{database_api_port}"
+    knowledge_transfer_gate = KnowledgeTransferGate(
+        database_api_url=database_api_url,
+    )
     yield
     logger.info("🛑 Shutting down Physics Assistant API")
+    if knowledge_transfer_gate:
+        await knowledge_transfer_gate.cleanup()
+        knowledge_transfer_gate = None
     # Cleanup agents if needed
     agent_store.clear()
 
@@ -197,6 +214,80 @@ async def get_or_create_agent(agent_id: str, use_direct_tools: bool = True, enab
 
     return agent_store[agent_key]
 
+
+def _append_perf_stage(
+    stages: list[Dict[str, Any]],
+    stage: str,
+    started_at: float,
+    **extra: Any,
+) -> None:
+    duration_ms = int((time.perf_counter() - started_at) * 1000)
+    item: Dict[str, Any] = {"stage": stage, "duration_ms": duration_ms}
+    item.update(extra)
+    stages.append(item)
+
+
+def _finalize_perf_trace(component: str, stages: list[Dict[str, Any]], started_at: float) -> Dict[str, Any]:
+    total_ms = int((time.perf_counter() - started_at) * 1000)
+    slowest = max(stages, key=lambda x: int(x.get("duration_ms", 0)), default={"stage": "none", "duration_ms": 0})
+    return {
+        "component": component,
+        "total_ms": total_ms,
+        "slowest_stage": slowest.get("stage", "none"),
+        "slowest_duration_ms": int(slowest.get("duration_ms", 0)),
+        "stages": stages,
+    }
+
+
+def _merge_performance_trace(
+    api_trace: Dict[str, Any],
+    hitl_trace: Optional[Dict[str, Any]] = None,
+    agent_trace: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    merged: Dict[str, Any] = {"api": api_trace}
+    if isinstance(hitl_trace, dict) and hitl_trace:
+        merged["hitl"] = hitl_trace
+    if isinstance(agent_trace, dict) and agent_trace:
+        merged["agent"] = agent_trace
+
+    candidates: list[Dict[str, Any]] = []
+    for component_key in ("api", "hitl", "agent"):
+        trace = merged.get(component_key)
+        if not isinstance(trace, dict):
+            continue
+        for stage in trace.get("stages", []) or []:
+            if not isinstance(stage, dict):
+                continue
+            candidates.append(
+                {
+                    "component": component_key,
+                    "stage": str(stage.get("stage", "unknown")),
+                    "duration_ms": int(stage.get("duration_ms", 0)),
+                }
+            )
+
+    slowest = max(candidates, key=lambda x: int(x.get("duration_ms", 0)), default={"component": "none", "stage": "none", "duration_ms": 0})
+    merged["request_total_ms"] = int(api_trace.get("total_ms", 0))
+    merged["slowest_stage"] = slowest
+    return merged
+
+
+def _log_slow_trace(agent_id: str, user_id: Optional[str], performance_trace: Dict[str, Any]) -> None:
+    total_ms = int(performance_trace.get("request_total_ms", 0))
+    threshold_ms = int(os.getenv("PERF_SLOW_REQUEST_MS", "15000"))
+    if total_ms < threshold_ms:
+        return
+    slowest = performance_trace.get("slowest_stage") or {}
+    logger.warning(
+        "SLOW_REQUEST_TRACE agent=%s user=%s total_ms=%s slowest_component=%s slowest_stage=%s slowest_ms=%s",
+        agent_id,
+        user_id or "unknown_user",
+        total_ms,
+        slowest.get("component", "unknown"),
+        slowest.get("stage", "unknown"),
+        int(slowest.get("duration_ms", 0)),
+    )
+
 # API Endpoints
 
 @app.get("/")
@@ -257,38 +348,170 @@ async def solve_problem(
     """
     Solve a physics problem using the specified agent
     """
+    request_started = time.perf_counter()
+    api_trace_stages: list[Dict[str, Any]] = []
+    hitl_trace: Optional[Dict[str, Any]] = None
+
     try:
+        stage_started = time.perf_counter()
         # Validate agent_id
         if agent_id not in ALL_VALID_AGENTS:
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid agent_id: {agent_id}. Must be one of: {', '.join(ALL_VALID_AGENTS)}"
             )
+        _append_perf_stage(api_trace_stages, "validate_agent_id", stage_started)
         
+        effective_problem = request.problem
+        hitl_question = None
+        hitl_result = None
+        guidance_prefix = None
+
+        kt_response = None
+        class_identifier = None
+        if isinstance(request.context, dict):
+            kt_response = request.context.get("knowledge_transfer_response")
+            class_identifier = request.context.get("class_identifier")
+
+        if knowledge_transfer_gate and knowledge_transfer_gate.is_enabled_for(agent_id):
+            if isinstance(kt_response, dict):
+                check_id = str(kt_response.get("check_id", "")).strip()
+                selected_option_id = str(kt_response.get("selected_option_id", "")).strip()
+                if check_id and selected_option_id:
+                    stage_started = time.perf_counter()
+                    hitl_result, hitl_trace = knowledge_transfer_gate.process_answer_with_trace(
+                        check_id=check_id,
+                        selected_option_id=selected_option_id,
+                        user_id=request.user_id or "react_user",
+                        session_id=request.session_id,
+                        class_identifier=class_identifier,
+                    )
+                    _append_perf_stage(
+                        api_trace_stages,
+                        "hitl_process_answer",
+                        stage_started,
+                        answer_processed=bool(hitl_result),
+                    )
+                    if hitl_result:
+                        effective_problem = str(hitl_result.get("original_problem", request.problem))
+                        guidance_prefix = str(hitl_result.get("guidance", "")).strip()
+                    else:
+                        logger.error(
+                            "HITL_GATE_FALLBACK: invalid/expired check_id provided; proceeding without gating. "
+                            "agent=%s user=%s check_id=%s",
+                            agent_id,
+                            request.user_id,
+                            check_id,
+                        )
+                else:
+                    logger.error(
+                        "HITL_GATE_FALLBACK: malformed knowledge_transfer_response payload; proceeding without gating. "
+                        "agent=%s user=%s",
+                        agent_id,
+                        request.user_id,
+                    )
+            else:
+                stage_started = time.perf_counter()
+                hitl_question, hitl_trace = await knowledge_transfer_gate.maybe_create_check_with_trace(
+                    agent_id=agent_id,
+                    problem=request.problem,
+                    user_id=request.user_id or "react_user",
+                    session_id=request.session_id,
+                    class_identifier=class_identifier,
+                )
+                _append_perf_stage(
+                    api_trace_stages,
+                    "hitl_maybe_create_check",
+                    stage_started,
+                    question_required=bool(hitl_question),
+                )
+                if hitl_question:
+                    stage_started = time.perf_counter()
+                    _append_perf_stage(api_trace_stages, "early_return_hitl_question", stage_started)
+                    api_trace = _finalize_perf_trace("api_route", api_trace_stages, request_started)
+                    performance_trace = _merge_performance_trace(api_trace=api_trace, hitl_trace=hitl_trace)
+                    _log_slow_trace(agent_id, request.user_id, performance_trace)
+                    return ProblemSolveResponse(
+                        success=True,
+                        agent_id=agent_id,
+                        problem=request.problem,
+                        solution="",
+                        hitl=hitl_question,
+                        metadata={
+                            "hitl": hitl_question,
+                            "framework": "strands",
+                            "performance_trace": performance_trace,
+                        },
+                    )
+
         # Get or create agent
+        stage_started = time.perf_counter()
         agent = await get_or_create_agent(agent_id, use_direct_tools, enable_rag, rag_api_url)
-        
-        logger.info(f"Solving problem with {agent_id}: {request.problem[:50]}...")
-        
+        _append_perf_stage(api_trace_stages, "get_or_create_agent", stage_started)
+
+        logger.info(f"Solving problem with {agent_id}: {effective_problem[:50]}...")
+
         # Solve the problem with user and session context for database logging
+        stage_started = time.perf_counter()
         result = await agent.solve_problem(
-            problem=request.problem, 
+            problem=effective_problem,
             context=request.context,
             user_id=request.user_id,
             session_id=request.session_id
         )
-        
+        _append_perf_stage(
+            api_trace_stages,
+            "agent_solve_problem",
+            stage_started,
+            success=bool(result.get("success")),
+        )
+
+        if result.get("success") and guidance_prefix and result.get("solution"):
+            result["solution"] = f"{guidance_prefix}\n\n{result['solution']}"
+
+        stage_started = time.perf_counter()
+        metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+        agent_trace = metadata.get("performance_trace") if isinstance(metadata.get("performance_trace"), dict) else None
+        if hitl_result:
+            metadata["hitl"] = {
+                "status": "answer_processed",
+                "check_id": hitl_result.get("check_id"),
+                "concept_tag": hitl_result.get("concept_tag"),
+                "was_correct": hitl_result.get("was_correct"),
+                "confidence": hitl_result.get("confidence"),
+                "threshold": hitl_result.get("threshold"),
+            }
+            result["hitl"] = metadata["hitl"]
+        elif hitl_question:
+            metadata["hitl"] = hitl_question
+            result["hitl"] = hitl_question
+        _append_perf_stage(api_trace_stages, "response_metadata_assembly", stage_started)
+
+        api_trace = _finalize_perf_trace("api_route", api_trace_stages, request_started)
+        metadata["performance_trace"] = _merge_performance_trace(
+            api_trace=api_trace,
+            hitl_trace=hitl_trace,
+            agent_trace=agent_trace,
+        )
+        _log_slow_trace(agent_id, request.user_id, metadata["performance_trace"])
+        if metadata:
+            result["metadata"] = metadata
+
         return ProblemSolveResponse(**result)
         
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error solving problem with {agent_id}: {str(e)}")
+        api_trace = _finalize_perf_trace("api_route", api_trace_stages, request_started)
+        performance_trace = _merge_performance_trace(api_trace=api_trace, hitl_trace=hitl_trace)
+        _log_slow_trace(agent_id, request.user_id, performance_trace)
         return ProblemSolveResponse(
             success=False,
             agent_id=agent_id,
             problem=request.problem,
-            error=str(e)
+            error=str(e),
+            metadata={"performance_trace": performance_trace},
         )
 
 @app.get("/agent/{agent_id}/health", response_model=AgentHealthResponse)

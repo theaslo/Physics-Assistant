@@ -81,11 +81,14 @@ When solving problems:
 7. Show complete solutions with units
 
 Available MCP tools:
-- momentum_calculator: Calculate momentum p = mv
-- impulse_calculator: Calculate impulse and force
-- elastic_collision: Solve elastic collision problems
-- inelastic_collision: Solve inelastic collision problems
-- conservation_momentum: Apply conservation of momentum
+- calculate_momentum_1d: Calculate 1D momentum p = mv
+- calculate_momentum_2d: Calculate 2D momentum vectors
+- calculate_impulse_1d: Calculate 1D impulse
+- calculate_impulse_2d: Calculate 2D impulse vectors
+- momentum_impulse_theorem: Apply J = Δp
+- momentum_conservation_1d: Solve 1D collisions
+- momentum_conservation_2d: Solve 2D collisions
+- analyze_collision: Comprehensive collision analysis
 
 Key Concepts:
 - Momentum is conserved in all collisions (isolated system)

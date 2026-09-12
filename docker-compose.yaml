@@ -356,6 +356,30 @@ services:
       - database-api
     restart: unless-stopped
 
+  mcp-knowledge-transfer:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    container_name: physics-mcp-knowledge-transfer
+    environment:
+      MCP_SERVICE: knowledge-transfer
+      MCP_PORT: 10112
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: streamable_http
+      DATABASE_API_HOST: database-api
+      DATABASE_API_PORT: 8001
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "10112"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+    networks:
+      - physics-network
+    depends_on:
+      - database-api
+    restart: unless-stopped
+
   physics-agents-api:
     build:
       context: .
@@ -378,6 +402,11 @@ services:
       MCP_ELECTROMAGNETISM_HOST: mcp-electromagnetism
       MCP_OPTICS_HOST: mcp-optics
       MCP_MODERN_PHYSICS_HOST: mcp-modern-physics
+      MCP_KNOWLEDGE_TRANSFER_HOST: mcp-knowledge-transfer
+      MCP_KNOWLEDGE_TRANSFER_PORT: 10112
+      HITL_GATE_ENABLED: "true"
+      HITL_GATE_THRESHOLD: "0.70"
+      HITL_PILOT_AGENTS: "forces_agent,kinematics_agent"
     volumes:
       - ./UI/logs:/app/logs
       - ./UI/temp:/app/temp
@@ -398,6 +427,7 @@ services:
       - mcp-electromagnetism
       - mcp-optics
       - mcp-modern-physics
+      - mcp-knowledge-transfer
     restart: unless-stopped
 
   # Layer 4 - Frontends

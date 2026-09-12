@@ -56,9 +56,12 @@ case $MCP_SERVICE in
     "modern-physics")
         cd /app/mcp_tools && exec python -m physics_mcp_tools --run modern-physics-server --host $MCP_HOST --port $MCP_PORT --transport $MCP_TRANSPORT
         ;;
+    "knowledge-transfer")
+        cd /app/mcp_tools && exec python -m physics_mcp_tools --run knowledge-transfer-server --host $MCP_HOST --port $MCP_PORT --transport $MCP_TRANSPORT
+        ;;
     *)
         echo "Unknown MCP service: $MCP_SERVICE"
-        echo "Available services: forces, kinematics, math, energy, momentum, angular-motion, circuit, thermodynamics, waves, electromagnetism, optics, modern-physics"
+        echo "Available services: forces, kinematics, math, energy, momentum, angular-motion, circuit, thermodynamics, waves, electromagnetism, optics, modern-physics, knowledge-transfer"
         exit 1
         ;;
 esac
