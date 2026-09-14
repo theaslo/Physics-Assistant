@@ -26,6 +26,17 @@ import KnowledgeCheckPanel from '../components/KnowledgeCheckPanel'
 import { getAgentIcon } from '../themes/uconn-theme'
 
 const DRAWER_WIDTH = 280
+const REMEDIATION_FOLLOW_UP_PATTERN =
+  /\b(next|step|hint|help|explain|why|understand|yes|no|continue)\b|don't|dont|doesn't|doesnt/i
+const NEXT_STEP_PATTERN = /\b(next|step|hint|continue)\b/i
+
+function isKnowledgeRemediationFollowUp(message: string): boolean {
+  return REMEDIATION_FOLLOW_UP_PATTERN.test(message.trim())
+}
+
+function isNextStepRequest(message: string): boolean {
+  return NEXT_STEP_PATTERN.test(message.trim())
+}
 
 export default function ChatPage() {
   const theme = useTheme()
@@ -47,6 +58,8 @@ export default function ChatPage() {
     logout,
     pendingKnowledgeCheck,
     setPendingKnowledgeCheck,
+    pendingHitlRemediation,
+    setPendingHitlRemediation,
   } = useStore()
 
   const messages = useMessages()
@@ -116,12 +129,18 @@ export default function ChatPage() {
   // Handle sending messages
   const handleSendMessage = useCallback(
     async (message: string) => {
-      if (!message.trim()) return
+      const trimmedMessage = message.trim()
+      if (!trimmedMessage) return
       if (pendingKnowledgeCheck) {
         setError('Complete the knowledge check before sending a new prompt.')
         return
       }
-      if (!selectedAgent) {
+      const remediationFollowUp =
+        pendingHitlRemediation && isKnowledgeRemediationFollowUp(trimmedMessage)
+          ? pendingHitlRemediation
+          : null
+      const agentForMessage = remediationFollowUp?.agentId || selectedAgent
+      if (!agentForMessage) {
         setError('Select a physics agent before sending a message.')
         return
       }
@@ -130,26 +149,62 @@ export default function ChatPage() {
       const userMessage = {
         id: `user-${Date.now()}`,
         role: 'user' as const,
-        content: message,
+        content: trimmedMessage,
         timestamp: Date.now(),
-        agentId: selectedAgent,
+        agentId: agentForMessage,
       }
       addMessage(userMessage)
       setLoading(true)
       setError(null)
 
       try {
+        if (remediationFollowUp) {
+          const advancesStep = isNextStepRequest(trimmedMessage)
+          const nextStepIndex = advancesStep
+            ? remediationFollowUp.nextStepIndex + 1
+            : remediationFollowUp.nextStepIndex
+          const response = await apiClient.sendMessage(
+            agentForMessage,
+            remediationFollowUp.originalProblem,
+            user?.username || 'react_user',
+            {
+              knowledge_transfer_remediation_followup: {
+                check_id: remediationFollowUp.checkId,
+                concept_tag: remediationFollowUp.conceptTag,
+                original_problem: remediationFollowUp.originalProblem,
+                student_message: trimmedMessage,
+                step_index: nextStepIndex,
+                mode: advancesStep ? 'next_step' : 'clarify',
+              },
+            }
+          )
+
+          if (response.success) {
+            appendAssistantMessage(agentForMessage, response)
+            setPendingHitlRemediation({
+              ...remediationFollowUp,
+              nextStepIndex,
+            })
+          } else {
+            setError(response.error || 'Failed to process the next-step request')
+          }
+          return
+        }
+
+        setPendingHitlRemediation(null)
+
         // Ensure agent is created
-        await apiClient.createAgent(selectedAgent)
+        await apiClient.createAgent(agentForMessage)
 
         // Send message
         const response = await apiClient.sendMessage(
-          selectedAgent,
-          message,
+          agentForMessage,
+          trimmedMessage,
           user?.username || 'react_user'
         )
 
         if (response.hitl?.status === 'question_required') {
+          setPendingHitlRemediation(null)
           setPendingKnowledgeCheck({
             checkId: response.hitl.check_id,
             agentId: response.hitl.agent_id,
@@ -160,13 +215,13 @@ export default function ChatPage() {
             confidence: response.hitl.confidence,
             threshold: response.hitl.threshold,
             reasonTags: response.hitl.reason_tags,
-            originalProblem: message,
+            originalProblem: trimmedMessage,
           })
           return
         }
 
         if (response.success) {
-          appendAssistantMessage(selectedAgent, response)
+          appendAssistantMessage(agentForMessage, response)
         } else {
           setError(response.error || 'Failed to get response from agent')
         }
@@ -181,11 +236,13 @@ export default function ChatPage() {
       selectedAgent,
       user,
       pendingKnowledgeCheck,
+      pendingHitlRemediation,
       addMessage,
       appendAssistantMessage,
       setLoading,
       setError,
       setPendingKnowledgeCheck,
+      setPendingHitlRemediation,
     ]
   )
 
@@ -221,6 +278,7 @@ export default function ChatPage() {
         )
 
         if (response.hitl?.status === 'question_required') {
+          setPendingHitlRemediation(null)
           setPendingKnowledgeCheck({
             checkId: response.hitl.check_id,
             agentId: response.hitl.agent_id,
@@ -236,6 +294,17 @@ export default function ChatPage() {
           return
         }
         if (response.success) {
+          if (response.hitl?.status === 'remediation_required') {
+            setPendingHitlRemediation({
+              checkId: activeCheck.checkId,
+              agentId,
+              conceptTag: activeCheck.conceptTag,
+              originalProblem: activeCheck.originalProblem,
+              nextStepIndex: 0,
+            })
+          } else {
+            setPendingHitlRemediation(null)
+          }
           appendAssistantMessage(agentId, response)
         } else {
           setError(response.error || 'Failed to process knowledge-check answer')
@@ -256,6 +325,7 @@ export default function ChatPage() {
       setLoading,
       setError,
       setPendingKnowledgeCheck,
+      setPendingHitlRemediation,
     ]
   )
 

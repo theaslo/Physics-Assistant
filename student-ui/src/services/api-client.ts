@@ -37,14 +37,16 @@ export interface KnowledgeTransferQuestion {
 }
 
 export interface KnowledgeTransferResult {
-  status: 'answer_processed' | 'remediation_required'
-  check_id: string
+  status: 'answer_processed' | 'remediation_required' | 'remediation_followup'
+  check_id?: string | null
   agent_id?: string
   concept_tag: string
-  was_correct: boolean
-  confidence: number
-  threshold: number
+  was_correct?: boolean
+  confidence?: number
+  threshold?: number
   guidance?: string
+  step_index?: number
+  student_message?: string
   remediation?: {
     prompt: string
     next_step_prompt: string

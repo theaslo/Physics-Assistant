@@ -630,6 +630,14 @@ export interface PendingKnowledgeCheck {
   originalProblem: string
 }
 
+export interface PendingHitlRemediation {
+  checkId: string
+  agentId: string
+  conceptTag: string
+  originalProblem: string
+  nextStepIndex: number
+}
+
 interface ChatState {
   // Auth
   isAuthenticated: boolean
@@ -647,6 +655,7 @@ interface ChatState {
   error: string | null
   sidebarOpen: boolean
   pendingKnowledgeCheck: PendingKnowledgeCheck | null
+  pendingHitlRemediation: PendingHitlRemediation | null
 
   // Actions
   login: (user: User) => void
@@ -659,6 +668,7 @@ interface ChatState {
   toggleSidebar: () => void
   clearMessages: (agentId?: string) => void
   setPendingKnowledgeCheck: (check: PendingKnowledgeCheck | null) => void
+  setPendingHitlRemediation: (remediation: PendingHitlRemediation | null) => void
 }
 
 export const useStore = create<ChatState>()(
@@ -674,6 +684,7 @@ export const useStore = create<ChatState>()(
       error: null,
       sidebarOpen: true,
       pendingKnowledgeCheck: null,
+      pendingHitlRemediation: null,
 
       // Actions
       login: (user) => set({ isAuthenticated: true, user }),
@@ -685,6 +696,7 @@ export const useStore = create<ChatState>()(
           selectedAgent: null,
           messagesByAgent: {},
           pendingKnowledgeCheck: null,
+          pendingHitlRemediation: null,
         }),
 
       setAgents: (agents) => set({ agents }),
@@ -722,6 +734,8 @@ export const useStore = create<ChatState>()(
       },
 
       setPendingKnowledgeCheck: (check) => set({ pendingKnowledgeCheck: check }),
+
+      setPendingHitlRemediation: (remediation) => set({ pendingHitlRemediation: remediation }),
     }),
     {
       name: 'physics-chat-storage',

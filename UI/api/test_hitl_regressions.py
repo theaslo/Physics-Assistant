@@ -186,6 +186,58 @@ class HitlApiRouteRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("do you understand why this answer is not correct", response.solution)
         self.assertIsNone(response.tools_used)
 
+    async def test_remediation_next_step_followup_returns_scaffold_without_solver(self):
+        async def fail_get_or_create_agent(*args: Any, **kwargs: Any):
+            raise AssertionError("solver should not be created for HITL remediation follow-ups")
+
+        self.api_main.knowledge_transfer_gate = None
+        self.api_main.get_or_create_agent = fail_get_or_create_agent
+
+        response = await self.api_main.solve_problem(
+            "kinematics_agent",
+            self.api_main.ProblemSolveRequest(
+                problem="A projectile is launched at 30 m/s at 45 degrees. Find the maximum height.",
+                user_id="student-a",
+                context={
+                    "knowledge_transfer_remediation_followup": {
+                        "check_id": "check-2",
+                        "concept_tag": "projectile_peak",
+                        "student_message": "next step",
+                        "step_index": 1,
+                    }
+                },
+            ),
+        )
+
+        self.assertTrue(response.success)
+        self.assertEqual(response.hitl["status"], "remediation_followup")
+        self.assertEqual(response.hitl["concept_tag"], "projectile_peak")
+        self.assertIn("Next step 1", response.solution)
+        self.assertIn("v_y = 0", response.solution)
+        self.assertIsNone(response.tools_used)
+
+    async def test_forces_remediation_followup_uses_text_submission_wording(self):
+        response = await self.api_main.solve_problem(
+            "forces_agent",
+            self.api_main.ProblemSolveRequest(
+                problem="A block slides on a 30 degree incline. Find the acceleration.",
+                user_id="student-a",
+                context={
+                    "knowledge_transfer_remediation_followup": {
+                        "check_id": "check-3",
+                        "concept_tag": "incline_components",
+                        "student_message": "next step",
+                        "step_index": 1,
+                    }
+                },
+            ),
+        )
+
+        self.assertTrue(response.success)
+        self.assertEqual(response.hitl["status"], "remediation_followup")
+        self.assertIn("tell me which direction you chose as positive", response.solution)
+        self.assertNotIn("Draw axes", response.solution)
+
 
 if __name__ == "__main__":
     unittest.main()

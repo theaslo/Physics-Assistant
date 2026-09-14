@@ -288,6 +288,129 @@ def _log_slow_trace(agent_id: str, user_id: Optional[str], performance_trace: Di
         int(slowest.get("duration_ms", 0)),
     )
 
+
+def _concept_remediation_explanation(agent_id: str, concept_tag: str) -> str:
+    if concept_tag == "hookes_law":
+        return (
+            "Hooke's law says the spring-force magnitude grows in direct proportion to stretch: |F_s| = k|x|. "
+            "So putting k in the denominator reverses the meaning: a stiffer spring should make a larger force for the same stretch, not a smaller one."
+        )
+    if concept_tag in {"projectile_components", "projectile_peak", "range_formula"}:
+        return (
+            "Projectile motion separates into horizontal and vertical parts. The horizontal velocity stays constant when we ignore air resistance, "
+            "while the vertical velocity changes because gravity acts downward."
+        )
+    if concept_tag == "newton_second_law":
+        return (
+            "Newton's second law connects the net force, not just one individual force, to acceleration: sum F = ma. "
+            "The direction of the net force sets the direction of the acceleration."
+        )
+    if concept_tag == "incline_components":
+        return (
+            "For an incline, it helps to rotate the axes so one axis is parallel to the ramp and the other is perpendicular. "
+            "Weight then splits into mg sin(theta) along the ramp and mg cos(theta) into the ramp."
+        )
+    if agent_id == "forces_agent":
+        return "For force problems, start by identifying the object, drawing all forces on that object, and choosing clear axes."
+    if agent_id == "kinematics_agent":
+        return "For kinematics problems, start by listing known quantities, the unknown, and which direction you will call positive."
+    return "Let's pause on the underlying concept before doing the algebra."
+
+
+def _concept_next_steps(agent_id: str, concept_tag: str) -> list[str]:
+    if concept_tag == "hookes_law":
+        return [
+            "Write the magnitude form of Hooke's law: |F_s| = k|x|. Identify k and x from the problem before doing arithmetic.",
+            "Substitute the given k and x values with units into |F_s| = k|x|, but pause before the final multiplication.",
+            "After finding the force magnitude, decide the direction: a spring force points opposite the stretch or compression.",
+        ]
+    if concept_tag == "projectile_components":
+        return [
+            "Split the launch velocity into components: v0x = v0 cos(theta) and v0y = v0 sin(theta).",
+            "Use the horizontal component for x-motion and the vertical component for y-motion. Keep gravity only in the vertical equation.",
+            "Choose the equation that contains your unknown, then substitute only the known quantities first.",
+        ]
+    if concept_tag == "projectile_peak":
+        return [
+            "At the highest point, set the vertical velocity to zero: v_y = 0. That is the key condition for peak height.",
+            "Use a vertical-motion equation such as v_y^2 = v0y^2 - 2g Delta y to relate the peak height to the initial vertical velocity.",
+            "Solve for the height change first. If the projectile starts above the ground, add the starting height afterward.",
+        ]
+    if concept_tag == "range_formula":
+        return [
+            "Find the flight time from vertical motion first: y(t) = h0 + v0y t - (1/2)gt^2.",
+            "Once you have the flight time, use horizontal motion: range = v0x t.",
+            "Check that your time is positive and that units stay in seconds and meters.",
+        ]
+    if concept_tag == "newton_second_law":
+        return [
+            "Choose the object as your system and list every external force acting on it.",
+            "Pick axes and write sum F = ma separately for each direction you need.",
+            "Substitute known values only after the force equation is set up.",
+        ]
+    if concept_tag == "incline_components":
+        return [
+            "Choose axes parallel and perpendicular to the ramp. In chat, tell me which direction you chose as positive along the ramp.",
+            "Break weight into components: mg sin(theta) along the ramp and mg cos(theta) perpendicular to the ramp.",
+            "Write the net-force equation along the ramp after you decide whether friction is present.",
+        ]
+    if agent_id == "forces_agent":
+        return [
+            "List the forces acting on the object, like weight, normal force, tension, friction, or applied force.",
+            "Choose axes and type the net-force equation in each direction.",
+            "Substitute values after the equations are set up.",
+        ]
+    if agent_id == "kinematics_agent":
+        return [
+            "List the known quantities, the unknown quantity, and the positive direction.",
+            "Choose the kinematics equation that includes the unknown and avoids extra unknowns.",
+            "Substitute known values with units before solving.",
+        ]
+    return [
+        "Identify the principle or equation that matches the concept check.",
+        "List the known values and the unknown before substituting numbers.",
+        "Try one algebra step, then send it back and I will check it.",
+    ]
+
+
+def _build_hitl_remediation_followup(
+    agent_id: str,
+    problem: str,
+    concept_tag: str,
+    student_message: str,
+    step_index: int,
+) -> str:
+    lower_message = (student_message or "").strip().lower()
+    asks_for_next_step = any(phrase in lower_message for phrase in ("next", "step", "hint", "continue"))
+    asks_for_explanation = any(
+        phrase in lower_message
+        for phrase in ("why", "explain", "don't understand", "dont understand", "do not understand", "not understand", "no")
+    )
+    understands = any(phrase in lower_message for phrase in ("yes", "understand", "got it", "makes sense"))
+
+    if asks_for_explanation and not asks_for_next_step:
+        return (
+            "Let's slow down before solving.\n\n"
+            f"{_concept_remediation_explanation(agent_id, concept_tag)}\n\n"
+            'Does that make sense now? If yes, reply "next step" and I will give only the next setup step.'
+        )
+
+    steps = _concept_next_steps(agent_id, concept_tag)
+    safe_step_index = max(1, min(step_index or 1, len(steps)))
+    next_step = steps[safe_step_index - 1]
+    if understands and not asks_for_next_step:
+        return (
+            "Good. Let's keep the solution hidden for now so you can do the thinking.\n\n"
+            f"When you are ready, try this setup step: {next_step}\n\n"
+            "Send me your setup or ask for the next step, and I will keep guiding you one step at a time."
+        )
+
+    return (
+        f"Next step {safe_step_index}: {next_step}\n\n"
+        "Try that part and send me your work. I will check it before moving on, without jumping to the full solution."
+    )
+
+
 # API Endpoints
 
 @app.get("/")
@@ -368,10 +491,53 @@ async def solve_problem(
         guidance_prefix = None
 
         kt_response = None
+        remediation_followup = None
         class_identifier = None
         if isinstance(request.context, dict):
             kt_response = request.context.get("knowledge_transfer_response")
+            remediation_followup = request.context.get("knowledge_transfer_remediation_followup")
             class_identifier = request.context.get("class_identifier")
+
+        if isinstance(remediation_followup, dict):
+            stage_started = time.perf_counter()
+            concept_tag = str(remediation_followup.get("concept_tag", "")).strip()
+            student_message = str(remediation_followup.get("student_message", "")).strip()
+            try:
+                step_index = int(remediation_followup.get("step_index", 1))
+            except (TypeError, ValueError):
+                step_index = 1
+            original_problem = str(remediation_followup.get("original_problem") or request.problem)
+            guidance = _build_hitl_remediation_followup(
+                agent_id=agent_id,
+                problem=original_problem,
+                concept_tag=concept_tag,
+                student_message=student_message,
+                step_index=step_index,
+            )
+            hitl_payload = {
+                "status": "remediation_followup",
+                "check_id": remediation_followup.get("check_id"),
+                "agent_id": agent_id,
+                "concept_tag": concept_tag,
+                "step_index": max(1, step_index),
+                "student_message": student_message,
+            }
+            _append_perf_stage(api_trace_stages, "early_return_hitl_remediation_followup", stage_started)
+            api_trace = _finalize_perf_trace("api_route", api_trace_stages, request_started)
+            performance_trace = _merge_performance_trace(api_trace=api_trace)
+            _log_slow_trace(agent_id, request.user_id, performance_trace)
+            return ProblemSolveResponse(
+                success=True,
+                agent_id=agent_id,
+                problem=original_problem,
+                solution=guidance,
+                hitl=hitl_payload,
+                metadata={
+                    "hitl": hitl_payload,
+                    "framework": "strands",
+                    "performance_trace": performance_trace,
+                },
+            )
 
         if knowledge_transfer_gate and knowledge_transfer_gate.is_enabled_for(agent_id):
             if isinstance(kt_response, dict):
