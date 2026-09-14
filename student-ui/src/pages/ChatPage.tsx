@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useState } from 'react'
 import {
   Box,
+  Button,
   Drawer,
   AppBar,
   Toolbar,
@@ -10,12 +11,14 @@ import {
   useTheme,
   CircularProgress,
   Alert,
+  Paper,
+  Stack,
 } from '@mui/material'
 import {
   Menu as MenuIcon,
   Science as ScienceIcon,
 } from '@mui/icons-material'
-import { useStore, useMessages, useSelectedAgentInfo } from '../stores/chat-store'
+import { useStore, useMessages, useSelectedAgentInfo, type StudentDrawing } from '../stores/chat-store'
 import { apiClient, type SolveResponse } from '../services/api-client'
 import AgentSelector from '../components/AgentSelector'
 import ChatMessage from '../components/ChatMessage'
@@ -26,16 +29,27 @@ import KnowledgeCheckPanel from '../components/KnowledgeCheckPanel'
 import { getAgentIcon } from '../themes/uconn-theme'
 
 const DRAWER_WIDTH = 280
-const REMEDIATION_FOLLOW_UP_PATTERN =
-  /\b(next|step|hint|help|explain|why|understand|yes|no|continue)\b|don't|dont|doesn't|doesnt/i
 const NEXT_STEP_PATTERN = /\b(next|step|hint|continue)\b/i
-
-function isKnowledgeRemediationFollowUp(message: string): boolean {
-  return REMEDIATION_FOLLOW_UP_PATTERN.test(message.trim())
-}
+const FULL_SOLUTION_PATTERN = /\b(full solution|show(?: me)?(?: the)? solution|give(?: me)?(?: the)? solution|i'?m lost|i am lost|completely lost|really lost|stuck)\b/i
 
 function isNextStepRequest(message: string): boolean {
   return NEXT_STEP_PATTERN.test(message.trim())
+}
+
+function isFullSolutionRequest(message: string): boolean {
+  return FULL_SOLUTION_PATTERN.test(message.trim())
+}
+
+function serializeDrawingForAnalysis(drawing?: StudentDrawing) {
+  if (!drawing) return undefined
+
+  return {
+    title: drawing.title,
+    width: drawing.width,
+    height: drawing.height,
+    created_at: drawing.createdAt,
+    strokes: drawing.strokes || [],
+  }
 }
 
 export default function ChatPage() {
@@ -107,7 +121,7 @@ export default function ChatPage() {
         const fallbackAgents = [
           { agent_id: 'forces_agent', name: 'Forces Agent', description: 'Force analysis and Newton\'s laws', icon: '⚖️' },
           { agent_id: 'kinematics_agent', name: 'Kinematics Agent', description: 'Motion analysis and projectile motion', icon: '🚀' },
-          { agent_id: 'math_agent', name: 'Math Agent', description: 'Mathematical calculations and algebra', icon: '🔢' },
+          { agent_id: 'math_agent', name: 'Math Agent', description: 'Physics algebra practice, calculations, and units', icon: '🔢' },
           { agent_id: 'momentum_agent', name: 'Momentum Agent', description: 'Momentum and collision analysis', icon: '💥' },
           { agent_id: 'energy_agent', name: 'Energy Agent', description: 'Work, energy, and conservation', icon: '⚡' },
           { agent_id: 'angular_motion_agent', name: 'Angular Motion Agent', description: 'Rotational motion and torque', icon: '🌀' },
@@ -128,18 +142,17 @@ export default function ChatPage() {
 
   // Handle sending messages
   const handleSendMessage = useCallback(
-    async (message: string) => {
+    async (message: string, drawing?: StudentDrawing) => {
       const trimmedMessage = message.trim()
-      if (!trimmedMessage) return
+      const hasDrawing = Boolean(drawing)
+      if (!trimmedMessage && !hasDrawing) return
       if (pendingKnowledgeCheck) {
         setError('Complete the knowledge check before sending a new prompt.')
         return
       }
-      const remediationFollowUp =
-        pendingHitlRemediation && isKnowledgeRemediationFollowUp(trimmedMessage)
-          ? pendingHitlRemediation
-          : null
+      const remediationFollowUp = pendingHitlRemediation ? pendingHitlRemediation : null
       const agentForMessage = remediationFollowUp?.agentId || selectedAgent
+      const drawingAnalysisPayload = serializeDrawingForAnalysis(drawing)
       if (!agentForMessage) {
         setError('Select a physics agent before sending a message.')
         return
@@ -149,20 +162,35 @@ export default function ChatPage() {
       const userMessage = {
         id: `user-${Date.now()}`,
         role: 'user' as const,
-        content: trimmedMessage,
+        content: trimmedMessage || 'Attached a sketch of my work.',
         timestamp: Date.now(),
         agentId: agentForMessage,
+        drawing,
       }
       addMessage(userMessage)
+
+      if (!trimmedMessage && hasDrawing && !remediationFollowUp) {
+        const assistantMessage = {
+          id: `assistant-${Date.now() + 1}`,
+          role: 'assistant' as const,
+          content: (
+            'I received your sketch. To analyze it accurately, please type the problem statement plus the key labels, axes, forces, or equations shown in the sketch.'
+          ),
+          timestamp: Date.now(),
+          agentId: agentForMessage,
+        }
+        addMessage(assistantMessage)
+        return
+      }
+
       setLoading(true)
       setError(null)
 
       try {
         if (remediationFollowUp) {
           const advancesStep = isNextStepRequest(trimmedMessage)
-          const nextStepIndex = advancesStep
-            ? remediationFollowUp.nextStepIndex + 1
-            : remediationFollowUp.nextStepIndex
+          const wantsFullSolution = isFullSolutionRequest(trimmedMessage)
+          const nextStepIndex = remediationFollowUp.nextStepIndex
           const response = await apiClient.sendMessage(
             agentForMessage,
             remediationFollowUp.originalProblem,
@@ -172,19 +200,32 @@ export default function ChatPage() {
                 check_id: remediationFollowUp.checkId,
                 concept_tag: remediationFollowUp.conceptTag,
                 original_problem: remediationFollowUp.originalProblem,
-                student_message: trimmedMessage,
+                student_message: trimmedMessage || 'Attached a sketch of my work.',
+                has_drawing: hasDrawing,
+                drawing: drawingAnalysisPayload,
                 step_index: nextStepIndex,
-                mode: advancesStep ? 'next_step' : 'clarify',
+                mode: wantsFullSolution ? 'full_solution' : advancesStep ? 'next_step' : 'clarify',
               },
             }
           )
 
           if (response.success) {
             appendAssistantMessage(agentForMessage, response)
-            setPendingHitlRemediation({
-              ...remediationFollowUp,
-              nextStepIndex,
-            })
+            if (
+              response.hitl?.status === 'remediation_complete' ||
+              response.hitl?.status === 'full_solution_requested'
+            ) {
+              setPendingHitlRemediation(null)
+            } else {
+              const returnedStepIndex =
+                response.hitl?.status === 'remediation_followup' && typeof response.hitl.step_index === 'number'
+                  ? response.hitl.step_index
+                  : nextStepIndex
+              setPendingHitlRemediation({
+                ...remediationFollowUp,
+                nextStepIndex: returnedStepIndex,
+              })
+            }
           } else {
             setError(response.error || 'Failed to process the next-step request')
           }
@@ -200,7 +241,12 @@ export default function ChatPage() {
         const response = await apiClient.sendMessage(
           agentForMessage,
           trimmedMessage,
-          user?.username || 'react_user'
+          user?.username || 'react_user',
+          drawingAnalysisPayload
+            ? {
+                student_drawing: drawingAnalysisPayload,
+              }
+            : undefined
         )
 
         if (response.hitl?.status === 'question_required') {
@@ -509,6 +555,46 @@ export default function ChatPage() {
         </Box>
 
         {/* Chat Input */}
+        {selectedAgent && pendingHitlRemediation && (
+          <Paper
+            elevation={0}
+            sx={{
+              mx: 2,
+              mb: 1,
+              p: 1.5,
+              border: '1px solid',
+              borderColor: 'warning.light',
+              borderRadius: 2,
+              bgcolor: 'rgba(237, 108, 2, 0.08)',
+            }}
+          >
+            <Typography variant="body2" sx={{ fontWeight: 800 }}>
+              Step-by-step check is active
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
+              Send your work to have it checked, ask for one more hint, or choose the full solution if you are stuck.
+            </Typography>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1 }}>
+              <Button
+                size="small"
+                variant="outlined"
+                disabled={loading || Boolean(pendingKnowledgeCheck)}
+                onClick={() => handleSendMessage('next step')}
+              >
+                Give me the next step
+              </Button>
+              <Button
+                size="small"
+                color="warning"
+                variant="contained"
+                disabled={loading || Boolean(pendingKnowledgeCheck)}
+                onClick={() => handleSendMessage("I'm lost. Please show the full solution.")}
+              >
+                I'm lost, show full solution
+              </Button>
+            </Stack>
+          </Paper>
+        )}
         {selectedAgent && (
           <ChatInput onSend={handleSendMessage} disabled={loading || Boolean(pendingKnowledgeCheck)} />
         )}

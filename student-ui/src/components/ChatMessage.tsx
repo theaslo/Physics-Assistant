@@ -42,6 +42,7 @@ import type {
   CarnotCycleAnimationPayload,
 } from '../stores/chat-store'
 import { getAgentColor, getAgentIcon } from '../themes/uconn-theme'
+import { formatPhysicsMathMarkdown } from '../utils/physics-math-markdown'
 
 interface ChatMessageProps {
   message: Message
@@ -200,11 +201,11 @@ function EquilibriumDiagram({ diagram, markerId }: { diagram: EquilibriumResidua
 
 function InclinedPlaneDiagram({ diagram, markerId }: { diagram: InclinedPlaneDiagramPayload; markerId: string }) {
   const width = 360
-  const height = 240
+  const height = 300
 
   const theta = (diagram.angle_deg * Math.PI) / 180
   const baseX = 60
-  const baseY = 190
+  const baseY = 205
   const inclineLength = 220
   const rise = inclineLength * Math.sin(theta)
   const run = inclineLength * Math.cos(theta)
@@ -226,6 +227,7 @@ function InclinedPlaneDiagram({ diagram, markerId }: { diagram: InclinedPlaneDia
   const uphill = { x: rampDx / rampMag, y: rampDy / rampMag }
   const downhill = { x: -uphill.x, y: -uphill.y }
   const normalOut = { x: uphill.y, y: -uphill.x }
+  const normalInto = { x: -normalOut.x, y: -normalOut.y }
 
   const maxForce = Math.max(
     1,
@@ -238,11 +240,19 @@ function InclinedPlaneDiagram({ diagram, markerId }: { diagram: InclinedPlaneDia
 
   return (
     <Box sx={{ mt: 1.5, p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
-      <Typography variant="subtitle2" sx={{ mb: 1 }}>{diagram.title}</Typography>
+      <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+        Free-body diagram: box on incline
+      </Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+        Solid arrows are real forces on the box. Dashed arrows are gravity components used for the ramp-axis calculation.
+      </Typography>
       <svg width="100%" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={diagram.title}>
         <defs>
-          <marker id={markerId} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+          <marker id={`${markerId}-force`} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
             <path d="M0,0 L8,4 L0,8 Z" fill="#1565C0" />
+          </marker>
+          <marker id={`${markerId}-component`} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L8,4 L0,8 Z" fill="#6B7280" />
           </marker>
         </defs>
         <polygon points={`${baseX},${baseY} ${topX},${topY} ${topX},${baseY}`} fill="#F3F4F6" stroke="#9CA3AF" strokeWidth="1.2" />
@@ -265,10 +275,10 @@ function InclinedPlaneDiagram({ diagram, markerId }: { diagram: InclinedPlaneDia
           y2={cy + scaledLen(diagram.weight_n)}
           stroke="#DC2626"
           strokeWidth="2"
-          markerEnd={`url(#${markerId})`}
+          markerEnd={`url(#${markerId}-force)`}
         />
         <text x={cx + 6} y={cy + scaledLen(diagram.weight_n) + 2} fontSize="10" fill="#DC2626">
-          W {diagram.weight_n.toFixed(1)}N
+          W = mg {diagram.weight_n.toFixed(1)} N
         </text>
 
         {/* Normal: perpendicular outward from the incline */}
@@ -279,7 +289,7 @@ function InclinedPlaneDiagram({ diagram, markerId }: { diagram: InclinedPlaneDia
           y2={cy + normalOut.y * scaledLen(diagram.normal_n)}
           stroke="#059669"
           strokeWidth="2"
-          markerEnd={`url(#${markerId})`}
+          markerEnd={`url(#${markerId}-force)`}
         />
         <text
           x={cx + normalOut.x * (scaledLen(diagram.normal_n) + 10)}
@@ -287,31 +297,12 @@ function InclinedPlaneDiagram({ diagram, markerId }: { diagram: InclinedPlaneDia
           fontSize="10"
           fill="#059669"
         >
-          N {diagram.normal_n.toFixed(1)}N
-        </text>
-
-        {/* Gravity component parallel to incline: downhill */}
-        <line
-          x1={cx}
-          y1={cy}
-          x2={cx + downhill.x * scaledLen(diagram.weight_parallel_n)}
-          y2={cy + downhill.y * scaledLen(diagram.weight_parallel_n)}
-          stroke="#2563EB"
-          strokeWidth="2"
-          markerEnd={`url(#${markerId})`}
-        />
-        <text
-          x={cx + downhill.x * (scaledLen(diagram.weight_parallel_n) + 12)}
-          y={cy + downhill.y * (scaledLen(diagram.weight_parallel_n) + 12)}
-          fontSize="10"
-          fill="#2563EB"
-        >
-          W∥ {diagram.weight_parallel_n.toFixed(1)}N
+          N {diagram.normal_n.toFixed(1)} N
         </text>
 
         {diagram.has_friction && diagram.friction_n !== undefined && (
           <>
-            {/* Friction opposes downhill tendency: uphill */}
+            {/* Kinetic friction opposes the stated downhill sliding motion. */}
             <line
               x1={cx}
               y1={cy}
@@ -319,7 +310,7 @@ function InclinedPlaneDiagram({ diagram, markerId }: { diagram: InclinedPlaneDia
               y2={cy + uphill.y * scaledLen(diagram.friction_n)}
               stroke="#7C3AED"
               strokeWidth="2"
-              markerEnd={`url(#${markerId})`}
+              markerEnd={`url(#${markerId}-force)`}
             />
             <text
               x={cx + uphill.x * (scaledLen(diagram.friction_n) + 10)}
@@ -327,12 +318,56 @@ function InclinedPlaneDiagram({ diagram, markerId }: { diagram: InclinedPlaneDia
               fontSize="10"
               fill="#7C3AED"
             >
-              f {diagram.friction_n.toFixed(1)}N
+              f_k {diagram.friction_n.toFixed(1)} N
             </text>
           </>
         )}
 
+        {/* Resolved weight components: useful for equations, not additional real forces. */}
+        <line
+          x1={cx}
+          y1={cy}
+          x2={cx + downhill.x * scaledLen(diagram.weight_parallel_n)}
+          y2={cy + downhill.y * scaledLen(diagram.weight_parallel_n)}
+          stroke="#6B7280"
+          strokeWidth="1.6"
+          strokeDasharray="5 4"
+          markerEnd={`url(#${markerId}-component)`}
+        />
+        <text
+          x={cx + downhill.x * (scaledLen(diagram.weight_parallel_n) + 12)}
+          y={cy + downhill.y * (scaledLen(diagram.weight_parallel_n) + 12)}
+          fontSize="10"
+          fill="#4B5563"
+        >
+          mg sinθ {diagram.weight_parallel_n.toFixed(1)} N
+        </text>
+        <line
+          x1={cx}
+          y1={cy}
+          x2={cx + normalInto.x * scaledLen(diagram.weight_perpendicular_n)}
+          y2={cy + normalInto.y * scaledLen(diagram.weight_perpendicular_n)}
+          stroke="#6B7280"
+          strokeWidth="1.6"
+          strokeDasharray="5 4"
+          markerEnd={`url(#${markerId}-component)`}
+        />
+        <text
+          x={cx + normalInto.x * (scaledLen(diagram.weight_perpendicular_n) + 8)}
+          y={cy + normalInto.y * (scaledLen(diagram.weight_perpendicular_n) + 8)}
+          fontSize="10"
+          fill="#4B5563"
+        >
+          mg cosθ {diagram.weight_perpendicular_n.toFixed(1)} N
+        </text>
+
         <text x={baseX + 6} y={baseY - 8} fontSize="11" fill="#111827">θ={diagram.angle_deg.toFixed(1)}°</text>
+        <text x={18} y={height - 38} fontSize="10" fill="#111827">
+          Along ramp: mg sinθ - f_k = {diagram.net_down_n.toFixed(2)} N
+        </text>
+        <text x={18} y={height - 22} fontSize="10" fill="#111827">
+          a = {diagram.mass_kg > 0 ? (diagram.net_down_n / diagram.mass_kg).toFixed(2) : '0.00'} m/s² down the ramp
+        </text>
       </svg>
     </Box>
   )
@@ -1425,6 +1460,39 @@ function ForcesDiagramRenderer({ diagram, markerId }: { diagram: DiagramPayload;
   }
 }
 
+function StudentSketchAttachment({ drawing, isUser }: { drawing: NonNullable<Message['drawing']>; isUser: boolean }) {
+  return (
+    <Box
+      sx={{
+        mt: 1.5,
+        p: 1,
+        borderRadius: 2,
+        border: '1px solid',
+        borderColor: isUser ? 'rgba(255,255,255,0.35)' : 'divider',
+        bgcolor: isUser ? 'rgba(255,255,255,0.12)' : 'grey.50',
+      }}
+    >
+      <Typography variant="caption" sx={{ display: 'block', mb: 0.75, opacity: 0.85 }}>
+        {drawing.title}
+      </Typography>
+      <Box
+        component="img"
+        src={drawing.dataUrl}
+        alt={drawing.title}
+        sx={{
+          display: 'block',
+          width: '100%',
+          maxWidth: 520,
+          borderRadius: 1.5,
+          bgcolor: 'white',
+          border: '1px solid',
+          borderColor: isUser ? 'rgba(255,255,255,0.3)' : 'divider',
+        }}
+      />
+    </Box>
+  )
+}
+
 export default function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.role === 'user'
   const agentColor = getAgentColor(message.agentId)
@@ -1512,9 +1580,13 @@ export default function ChatMessage({ message }: ChatMessageProps) {
               remarkPlugins={[remarkMath]}
               rehypePlugins={[rehypeKatex]}
             >
-              {message.content}
+              {formatPhysicsMathMarkdown(message.content)}
             </ReactMarkdown>
           </Box>
+
+          {message.drawing && (
+            <StudentSketchAttachment drawing={message.drawing} isUser={isUser} />
+          )}
 
           {hasDiagram && message.diagram && (
             <ForcesDiagramRenderer diagram={message.diagram} markerId={markerId} />

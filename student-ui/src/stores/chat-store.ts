@@ -10,6 +10,27 @@ export interface Message {
   toolsUsed?: string[]
   reasoning?: string
   diagram?: DiagramPayload
+  drawing?: StudentDrawing
+}
+
+export interface StudentDrawing {
+  dataUrl: string
+  title: string
+  width: number
+  height: number
+  createdAt: number
+  strokes?: StudentSketchStroke[]
+}
+
+export interface StudentSketchPoint {
+  x: number
+  y: number
+}
+
+export interface StudentSketchStroke {
+  tool: 'pen' | 'eraser'
+  color: string
+  points: StudentSketchPoint[]
 }
 
 export interface DiagramForce {

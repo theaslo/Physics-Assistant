@@ -57,6 +57,13 @@ class StrandsPhysicsAgent(ABC):
         self.angular_shm_fastpath_timeout_seconds = int(
             os.getenv("ANGULAR_SHM_FASTPATH_TIMEOUT_SECONDS", "45")
         )
+        self.fast_mcp_router_enabled = os.getenv("FAST_MCP_ROUTER_ENABLED", "true").lower() not in {"0", "false", "no"}
+        self.fast_mcp_router_timeout_seconds = float(os.getenv("FAST_MCP_ROUTER_TIMEOUT_SECONDS", "8"))
+        self.fast_mcp_router_backoff_seconds = float(os.getenv("FAST_MCP_ROUTER_BACKOFF_SECONDS", "120"))
+        self.fast_mcp_router_model_id = os.getenv("FAST_MCP_ROUTER_MODEL_ID", self.model_id)
+        self.fast_mcp_explain_timeout_seconds = float(os.getenv("FAST_MCP_EXPLAIN_TIMEOUT_SECONDS", "18"))
+        self.fast_mcp_explain_with_llm = os.getenv("FAST_MCP_EXPLAIN_WITH_LLM", "false").lower() in {"1", "true", "yes"}
+        self._fast_mcp_router_unavailable_until = 0.0
 
         # Will be initialized on first use
         self.mcp_client: Optional[MCPClient] = None
@@ -289,14 +296,232 @@ class StrandsPhysicsAgent(ABC):
                 rag_context_used=rag_context is not None,
             )
 
-            if self.agent_id == "forces_agent" and self._is_free_body_diagram_request(problem):
-                fastpath_stage_started = time.perf_counter()
-                diagram = self._build_free_body_diagram_fallback(problem)
+            fast_mcp_stage_started = time.perf_counter()
+            fast_mcp_result = await self._try_fast_mcp_guided_solution(
+                problem=problem,
+                rag_context=rag_context,
+            )
+            self._append_perf_stage(
+                perf_stages,
+                "fast_mcp_guided_pipeline",
+                fast_mcp_stage_started,
+                used=bool(fast_mcp_result),
+                tools=fast_mcp_result.get("tool_names") if fast_mcp_result else None,
+                fallback_reason=fast_mcp_result.get("fallback_reason") if fast_mcp_result else None,
+            )
+            if fast_mcp_result:
+                fast_mcp_tools = fast_mcp_result["tool_names"]
+                execution_time_ms = int((time.time() - start_time) * 1000)
+                db_stage_started = time.perf_counter()
+                if self.db_client:
+                    self._log_interaction(
+                        problem=problem,
+                        solution=fast_mcp_result["solution"],
+                        tools_used=fast_mcp_tools,
+                        execution_time_ms=execution_time_ms,
+                        user_id=user_id,
+                        session_id=session_id,
+                    )
                 self._append_perf_stage(
                     perf_stages,
-                    "forces_free_body_direct_diagram",
+                    "database_log_interaction",
+                    db_stage_started,
+                    db_logging_enabled=self.db_client is not None,
+                )
+                perf_trace = self._build_perf_trace(perf_stages, perf_started)
+                return {
+                    "success": True,
+                    "agent_id": self.agent_id,
+                    "problem": problem,
+                    "solution": fast_mcp_result["solution"],
+                    "reasoning": (
+                        "Used a compact LLM tool-selection plan followed by a direct MCP tool call."
+                    ),
+                    "tools_used": fast_mcp_tools,
+                    "execution_time_ms": execution_time_ms,
+                    "diagram": fast_mcp_result.get("diagram"),
+                    "metadata": {
+                        "rag_enabled": self.rag_client is not None,
+                        "rag_context_used": rag_context is not None,
+                        "framework": "strands",
+                        "fast_mcp_pipeline": {
+                            "llm_plan_used": True,
+                            "mcp_tool_called": True,
+                            "tool_names": fast_mcp_tools,
+                            "llm_explanation_used": bool(fast_mcp_result.get("llm_explanation_used")),
+                        },
+                        "performance_trace": perf_trace,
+                    },
+                }
+
+            if self.agent_id == "math_agent" and self._is_vector_components_request(problem):
+                fastpath_stage_started = time.perf_counter()
+                vector_result = self._call_vector_components_mcp_tool(problem)
+                self._append_perf_stage(
+                    perf_stages,
+                    "math_vector_components_mcp_tool",
+                    fastpath_stage_started,
+                    recovered=bool(vector_result),
+                )
+                if vector_result:
+                    execution_time_ms = int((time.time() - start_time) * 1000)
+                    db_stage_started = time.perf_counter()
+                    if self.db_client:
+                        self._log_interaction(
+                            problem=problem,
+                            solution=vector_result["solution"],
+                            tools_used=["resolve_vector_components"],
+                            execution_time_ms=execution_time_ms,
+                            user_id=user_id,
+                            session_id=session_id,
+                        )
+                    self._append_perf_stage(
+                        perf_stages,
+                        "database_log_interaction",
+                        db_stage_started,
+                        db_logging_enabled=self.db_client is not None,
+                    )
+                    perf_trace = self._build_perf_trace(perf_stages, perf_started)
+                    return {
+                        "success": True,
+                        "agent_id": self.agent_id,
+                        "problem": problem,
+                        "solution": vector_result["solution"],
+                        "reasoning": "Used the Math MCP resolve_vector_components tool directly.",
+                        "tools_used": ["resolve_vector_components"],
+                        "execution_time_ms": execution_time_ms,
+                        "diagram": vector_result.get("diagram"),
+                        "metadata": {
+                            "rag_enabled": self.rag_client is not None,
+                            "rag_context_used": rag_context is not None,
+                            "framework": "strands",
+                            "fastpath_recovery": True,
+                            "performance_trace": perf_trace,
+                        },
+                    }
+
+            if self.agent_id == "math_agent" and self._is_physics_algebra_exercise_request(problem):
+                fastpath_stage_started = time.perf_counter()
+                exercise_result = self._build_physics_algebra_exercises(problem)
+                self._append_perf_stage(
+                    perf_stages,
+                    "math_physics_algebra_exercise_generation",
+                    fastpath_stage_started,
+                    exercise_count=exercise_result["exercise_count"],
+                )
+                execution_time_ms = int((time.time() - start_time) * 1000)
+                db_stage_started = time.perf_counter()
+                if self.db_client:
+                    self._log_interaction(
+                        problem=problem,
+                        solution=exercise_result["solution"],
+                        tools_used=["physics_algebra_exercise_generator"],
+                        execution_time_ms=execution_time_ms,
+                        user_id=user_id,
+                        session_id=session_id,
+                    )
+                self._append_perf_stage(
+                    perf_stages,
+                    "database_log_interaction",
+                    db_stage_started,
+                    db_logging_enabled=self.db_client is not None,
+                )
+                perf_trace = self._build_perf_trace(perf_stages, perf_started)
+                return {
+                    "success": True,
+                    "agent_id": self.agent_id,
+                    "problem": problem,
+                    "solution": exercise_result["solution"],
+                    "reasoning": "Generated physics-related algebra practice exercises deterministically.",
+                    "tools_used": ["physics_algebra_exercise_generator"],
+                    "execution_time_ms": execution_time_ms,
+                    "diagram": None,
+                    "metadata": {
+                        "rag_enabled": self.rag_client is not None,
+                        "rag_context_used": rag_context is not None,
+                        "framework": "strands",
+                        "exercise_mode": {
+                            "type": "physics_algebra",
+                            "topic": exercise_result["topic"],
+                            "difficulty": exercise_result["difficulty"],
+                            "exercise_count": exercise_result["exercise_count"],
+                            "includes_answer_key": exercise_result["includes_answer_key"],
+                        },
+                        "performance_trace": perf_trace,
+                    },
+                }
+
+            if self.agent_id == "forces_agent" and self._is_incline_problem(problem):
+                fastpath_stage_started = time.perf_counter()
+                incline_result = self._call_incline_mcp_tool(problem)
+                diagram = incline_result.get("diagram") if incline_result else None
+                if not diagram:
+                    diagram = self._build_inclined_plane_diagram_fallback(problem)
+                self._append_perf_stage(
+                    perf_stages,
+                    "forces_incline_mcp_fallback",
                     fastpath_stage_started,
                     recovered=bool(diagram),
+                    used_mcp=bool(incline_result),
+                )
+                if diagram:
+                    execution_time_ms = int((time.time() - start_time) * 1000)
+                    solution = (
+                        self._format_incline_summary_from_diagram(diagram)
+                        if diagram
+                        else incline_result["solution"]
+                    )
+                    db_stage_started = time.perf_counter()
+                    if self.db_client:
+                        self._log_interaction(
+                            problem=problem,
+                            solution=solution,
+                            tools_used=["analyze_forces_on_incline"],
+                            execution_time_ms=execution_time_ms,
+                            user_id=user_id,
+                            session_id=session_id,
+                        )
+                    self._append_perf_stage(
+                        perf_stages,
+                        "database_log_interaction",
+                        db_stage_started,
+                        db_logging_enabled=self.db_client is not None,
+                    )
+                    perf_trace = self._build_perf_trace(perf_stages, perf_started)
+                    return {
+                        "success": True,
+                        "agent_id": self.agent_id,
+                        "problem": problem,
+                        "solution": solution,
+                        "reasoning": (
+                            "Called analyze_forces_on_incline through MCP."
+                            if incline_result
+                            else "Recovered inclined-plane force diagram using deterministic parsing."
+                        ),
+                        "tools_used": ["analyze_forces_on_incline"],
+                        "execution_time_ms": execution_time_ms,
+                        "diagram": diagram,
+                        "metadata": {
+                            "rag_enabled": self.rag_client is not None,
+                            "rag_context_used": rag_context is not None,
+                            "framework": "strands",
+                            "fastpath_recovery": True,
+                            "performance_trace": perf_trace,
+                        },
+                    }
+
+            if self.agent_id == "forces_agent" and self._is_free_body_diagram_request(problem):
+                fastpath_stage_started = time.perf_counter()
+                fbd_result = self._call_free_body_diagram_mcp_tool(problem)
+                diagram = fbd_result.get("diagram") if fbd_result else None
+                if not diagram:
+                    diagram = self._build_free_body_diagram_fallback(problem)
+                self._append_perf_stage(
+                    perf_stages,
+                    "forces_free_body_mcp_fallback",
+                    fastpath_stage_started,
+                    recovered=bool(diagram),
+                    used_mcp=bool(fbd_result),
                 )
                 if diagram:
                     execution_time_ms = int((time.time() - start_time) * 1000)
@@ -323,7 +548,11 @@ class StrandsPhysicsAgent(ABC):
                         "agent_id": self.agent_id,
                         "problem": problem,
                         "solution": solution,
-                        "reasoning": "Generated free-body diagram using deterministic force parsing.",
+                        "reasoning": (
+                            "Called create_free_body_diagram through MCP."
+                            if fbd_result
+                            else "Recovered free-body diagram using deterministic force parsing."
+                        ),
                         "tools_used": ["create_free_body_diagram"],
                         "execution_time_ms": execution_time_ms,
                         "diagram": diagram,
@@ -338,12 +567,13 @@ class StrandsPhysicsAgent(ABC):
 
             if self.agent_id == "forces_agent" and self._is_spring_force_problem(problem):
                 fastpath_stage_started = time.perf_counter()
-                spring_result = self._build_spring_force_solution(problem)
+                spring_result = self._call_spring_force_mcp_tool(problem) or self._build_spring_force_solution(problem)
                 self._append_perf_stage(
                     perf_stages,
-                    "forces_spring_direct_solution",
+                    "forces_spring_mcp_fallback",
                     fastpath_stage_started,
                     recovered=bool(spring_result),
+                    used_mcp=bool(spring_result and spring_result.get("source") == "mcp"),
                 )
                 if spring_result:
                     execution_time_ms = int((time.time() - start_time) * 1000)
@@ -371,7 +601,11 @@ class StrandsPhysicsAgent(ABC):
                         "agent_id": self.agent_id,
                         "problem": problem,
                         "solution": solution,
-                        "reasoning": "Solved Hooke's law using deterministic spring-force parsing.",
+                        "reasoning": (
+                            "Called calculate_spring_force_tool through MCP."
+                            if spring_result.get("source") == "mcp"
+                            else "Recovered Hooke's law using deterministic spring-force parsing."
+                        ),
                         "tools_used": tool_names,
                         "execution_time_ms": execution_time_ms,
                         "diagram": None,
@@ -390,16 +624,24 @@ class StrandsPhysicsAgent(ABC):
                 and expected_kinematics_tool in {"projectile_motion_2d", "projectile_velocity_animation"}
             ):
                 fastpath_stage_started = time.perf_counter()
-                diagram = self._build_projectile_diagram_fallback(problem, expected_kinematics_tool)
+                projectile_result = self._call_projectile_mcp_tool(problem, expected_kinematics_tool)
+                diagram = projectile_result.get("diagram") if projectile_result else None
+                if not diagram:
+                    diagram = self._build_projectile_diagram_fallback(problem, expected_kinematics_tool)
                 self._append_perf_stage(
                     perf_stages,
-                    "kinematics_projectile_direct_solution",
+                    "kinematics_projectile_mcp_fallback",
                     fastpath_stage_started,
                     recovered=bool(diagram),
+                    used_mcp=bool(projectile_result),
                 )
                 if diagram:
                     execution_time_ms = int((time.time() - start_time) * 1000)
-                    solution = self._format_projectile_summary(diagram)
+                    solution = (
+                        self._strip_embedded_diagram_json(projectile_result["solution"]).strip()
+                        if projectile_result
+                        else self._format_projectile_summary(diagram)
+                    )
                     db_stage_started = time.perf_counter()
                     if self.db_client:
                         self._log_interaction(
@@ -422,7 +664,11 @@ class StrandsPhysicsAgent(ABC):
                         "agent_id": self.agent_id,
                         "problem": problem,
                         "solution": solution,
-                        "reasoning": "Generated projectile diagram using deterministic kinematics equations.",
+                        "reasoning": (
+                            f"Called {expected_kinematics_tool} through MCP."
+                            if projectile_result
+                            else "Recovered projectile diagram using deterministic kinematics equations."
+                        ),
                         "tools_used": [expected_kinematics_tool],
                         "execution_time_ms": execution_time_ms,
                         "diagram": diagram,
@@ -906,6 +1152,617 @@ class StrandsPhysicsAgent(ABC):
             "stages": stages,
         }
 
+    async def _try_fast_mcp_guided_solution(
+        self,
+        problem: str,
+        rag_context: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Use a compact LLM plan to call MCP tools directly before the full agent loop."""
+        if not self.fast_mcp_router_enabled or not self.mcp_client:
+            return None
+
+        catalog = self._fast_mcp_tool_catalog()
+        if not catalog:
+            return None
+
+        plan = await self._build_fast_mcp_plan_with_llm(problem, catalog, rag_context)
+        calls = self._extract_fast_mcp_tool_calls(plan, catalog)
+        if not calls:
+            return None
+
+        tool_names: list[str] = []
+        raw_outputs: list[str] = []
+        diagrams: list[Dict[str, Any]] = []
+
+        for index, call in enumerate(calls, start=1):
+            tool_name = call["tool_name"]
+            arguments = call["arguments"]
+            try:
+                tool_result = self._call_mcp_tool_direct(tool_name, arguments)
+            except Exception as exc:
+                logger.warning("Fast MCP call failed for %s: %s", tool_name, exc)
+                return None
+
+            raw_text = self._extract_text_from_mcp_tool_result(tool_result)
+            if not raw_text:
+                logger.warning("Fast MCP call for %s returned no text: %s", tool_name, tool_result)
+                return None
+
+            tool_names.append(tool_name)
+            raw_outputs.append(raw_text)
+            diagram = self._extract_diagram_from_text(raw_text)
+            if diagram:
+                diagrams.append(diagram)
+
+            if index >= 3:
+                break
+
+        combined_tool_text = self._combine_fast_mcp_outputs(tool_names, raw_outputs)
+        solution = self._strip_embedded_diagram_json(combined_tool_text).strip()
+
+        llm_solution = await self._format_fast_mcp_response_with_llm(
+            problem=problem,
+            plan=plan,
+            tool_names=tool_names,
+            tool_output=combined_tool_text,
+        )
+        if llm_solution:
+            solution = llm_solution
+
+        return {
+            "solution": solution,
+            "tool_names": tool_names,
+            "diagram": diagrams[0] if diagrams else self._extract_diagram_from_text(combined_tool_text),
+            "llm_explanation_used": bool(llm_solution),
+        }
+
+    async def _build_fast_mcp_plan_with_llm(
+        self,
+        problem: str,
+        catalog: list[Dict[str, Any]],
+        rag_context: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Ask the configured Ollama model for a compact MCP routing plan."""
+        now = time.time()
+        if now < self._fast_mcp_router_unavailable_until:
+            return None
+
+        prompt = self._build_fast_mcp_router_prompt(problem, catalog, rag_context)
+        try:
+            raw_response = await asyncio.to_thread(
+                self._request_ollama_generate,
+                prompt,
+                self.fast_mcp_router_timeout_seconds,
+                650,
+                True,
+                self.fast_mcp_router_model_id,
+            )
+        except Exception as exc:
+            logger.info("Fast MCP planner unavailable for %s: %s", self.agent_id, exc)
+            self._fast_mcp_router_unavailable_until = now + self.fast_mcp_router_backoff_seconds
+            return None
+
+        plan = self._parse_llm_json_object(raw_response)
+        if not isinstance(plan, dict):
+            logger.info("Fast MCP planner returned non-JSON output for %s", self.agent_id)
+            return None
+        return plan
+
+    def _build_fast_mcp_router_prompt(
+        self,
+        problem: str,
+        catalog: list[Dict[str, Any]],
+        rag_context: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        rag_hint = ""
+        if rag_context:
+            try:
+                rag_hint = json.dumps(rag_context, ensure_ascii=True)[:1200]
+            except TypeError:
+                rag_hint = str(rag_context)[:1200]
+        allowed_tool_names = [tool.get("name") for tool in catalog if tool.get("name")]
+
+        return (
+            "You are a fast physics MCP router. Your only job is to choose MCP tool calls.\n"
+            "Do not answer the student. Do not include session_id. Do not include student_question. "
+            "Do not include any keys except the schema keys below.\n\n"
+            "Allowed tool names:\n"
+            f"{json.dumps(allowed_tool_names, ensure_ascii=True)}\n\n"
+            "Return exactly one JSON object in this schema:\n"
+            "{\n"
+            '  "can_solve_with_mcp": true or false,\n'
+            '  "tool_calls": [\n'
+            '    {"tool_name": "one_allowed_tool_name", "arguments": {"argument_name": "argument_value"}}\n'
+            "  ],\n"
+            '  "missing_information": [],\n'
+            '  "confidence": 0.0\n'
+            "}\n\n"
+            "Example for unit conversion plus constant-velocity distance:\n"
+            '{"can_solve_with_mcp":true,"tool_calls":[{"tool_name":"unit_converter","arguments":{"value":72,"from_unit":"km/h","to_unit":"m/s"}},{"tool_name":"physics_formula_solver","arguments":{"formula_name":"uniform_motion","known_values":{"speed":72,"speed_unit":"km/h","time":5},"solve_for":"distance"}}],"missing_information":[],"confidence":0.95}\n\n'
+            "Rules:\n"
+            "- Use 1 tool call when possible; use at most 3 if the request explicitly needs multiple calculations.\n"
+            "- Choose only tools from the catalog below.\n"
+            "- If required quantities are missing, return can_solve_with_mcp=false and list missing_information.\n"
+            "- Convert common units to SI where needed, for example cm to m.\n"
+            "- For arguments described as JSON strings, you may return an object; the API will serialize it.\n"
+            "- For diagrams, graphs, projectile trajectories, and free-body diagrams, choose a diagram-capable tool.\n\n"
+            f"Agent: {self.agent_id}\n"
+            f"Tool catalog:\n{json.dumps(catalog, ensure_ascii=True)}\n\n"
+            f"Retrieved course context, if useful:\n{rag_hint}\n\n"
+            f"Student question:\n{problem}"
+        )
+
+    def _request_ollama_generate(
+        self,
+        prompt: str,
+        timeout_seconds: float,
+        num_predict: int,
+        json_format: bool = False,
+        model_id: Optional[str] = None,
+    ) -> str:
+        """Call Ollama directly for short planner/rewrite prompts."""
+        payload: Dict[str, Any] = {
+            "model": model_id or self.model_id,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0,
+                "num_predict": num_predict,
+            },
+        }
+        if json_format:
+            payload["format"] = "json"
+
+        connect_timeout = min(3.0, max(1.0, timeout_seconds))
+        response = requests.post(
+            f"{self.llm_host.rstrip('/')}/api/generate",
+            json=payload,
+            timeout=(connect_timeout, timeout_seconds),
+        )
+        response.raise_for_status()
+        data = response.json()
+        return str(data.get("response", "")).strip()
+
+    def _parse_llm_json_object(self, text: str) -> Optional[Dict[str, Any]]:
+        """Parse a JSON object even if the model wraps it in markdown or thinking text."""
+        cleaned = text.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+            cleaned = re.sub(r"\s*```$", "", cleaned)
+
+        decoder = json.JSONDecoder()
+        for start in [0, *[match.start() for match in re.finditer(r"\{", cleaned)]]:
+            try:
+                parsed, _ = decoder.raw_decode(cleaned[start:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+        return None
+
+    def _extract_fast_mcp_tool_calls(
+        self,
+        plan: Optional[Dict[str, Any]],
+        catalog: list[Dict[str, Any]],
+    ) -> list[Dict[str, Any]]:
+        """Validate and normalize planner tool calls."""
+        if not plan:
+            return []
+        can_solve = plan.get("can_solve_with_mcp", True)
+        if can_solve is False or (isinstance(can_solve, str) and can_solve.lower() in {"false", "no", "0"}):
+            return []
+
+        allowed_tools = {item["name"] for item in catalog if isinstance(item.get("name"), str)}
+        raw_calls = plan.get("tool_calls")
+        if raw_calls is None and plan.get("tool_name"):
+            raw_calls = [{"tool_name": plan.get("tool_name"), "arguments": plan.get("arguments", {})}]
+        if isinstance(raw_calls, dict):
+            raw_calls = [raw_calls]
+        if not isinstance(raw_calls, list):
+            return []
+
+        normalized_calls: list[Dict[str, Any]] = []
+        for raw_call in raw_calls[:3]:
+            if not isinstance(raw_call, dict):
+                continue
+            tool_name = str(raw_call.get("tool_name", "")).strip()
+            if tool_name not in allowed_tools:
+                continue
+            arguments = raw_call.get("arguments", {})
+            if not isinstance(arguments, dict):
+                continue
+            normalized_arguments = self._normalize_fast_mcp_arguments(tool_name, arguments)
+            if normalized_arguments is None:
+                continue
+            normalized_calls.append({"tool_name": tool_name, "arguments": normalized_arguments})
+
+        return normalized_calls
+
+    def _normalize_fast_mcp_arguments(
+        self,
+        tool_name: str,
+        arguments: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Coerce LLM planner output into the MCP tool argument contract."""
+        json_string_args = {
+            "known_values",
+            "launch_conditions",
+            "target_info",
+            "parameters",
+            "objects_data",
+            "forces",
+            "forces_data",
+            "force_components",
+            "spring_data",
+            "newton_data",
+            "masses",
+            "angles",
+            "vector_data",
+            "problem_data",
+            "collision_data",
+            "collision_scenario",
+            "force_data",
+            "system_data",
+            "friction_data",
+            "kinematics_data",
+            "object_data",
+            "torque_data",
+            "momentum_data",
+            "energy_data",
+            "impulse_data",
+            "rolling_data",
+            "circular_data",
+            "shm_data",
+            "wave_data",
+            "doppler_data",
+            "sound_data",
+            "standing_wave_data",
+            "interference_data",
+            "gas_data",
+            "heat_data",
+            "expansion_data",
+            "conduction_data",
+            "carnot_data",
+            "coulomb_data",
+            "field_data",
+            "potential_data",
+            "capacitor_data",
+            "circuit_data",
+            "network_data",
+            "magnetic_data",
+            "wire_data",
+            "faraday_data",
+            "refraction_data",
+            "optics_data",
+            "diffraction_data",
+            "film_data",
+            "power_data",
+            "relativity_data",
+            "contraction_data",
+            "photo_data",
+            "matter_wave_data",
+            "bohr_data",
+            "decay_data",
+            "known_values",
+        }
+        numeric_args = {
+            "magnitude",
+            "angle_degrees",
+            "coefficient",
+            "normal_force",
+            "mass",
+            "gravity",
+            "force",
+            "time",
+            "initial_momentum",
+            "final_momentum",
+            "displacement",
+            "velocity",
+            "height",
+            "spring_constant",
+            "angle_degrees",
+            "value",
+        }
+        int_args = {"frames"}
+
+        normalized: Dict[str, Any] = {}
+        for key, value in arguments.items():
+            if value is None:
+                continue
+            normalized_key = str(key).strip()
+            if not normalized_key:
+                continue
+            if normalized_key in json_string_args and isinstance(value, (dict, list)):
+                normalized[normalized_key] = json.dumps(value)
+            elif normalized_key in numeric_args:
+                try:
+                    normalized[normalized_key] = float(value)
+                except (TypeError, ValueError):
+                    return None
+            elif normalized_key in int_args:
+                try:
+                    normalized[normalized_key] = int(value)
+                except (TypeError, ValueError):
+                    return None
+            else:
+                normalized[normalized_key] = value
+
+        if tool_name == "projectile_velocity_animation" and "frames" not in normalized:
+            normalized["frames"] = 18
+
+        return normalized
+
+    def _call_mcp_tool_direct(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.mcp_client:
+            raise RuntimeError("MCP client is not initialized")
+        result = self.mcp_client.call_tool_sync(
+            tool_use_id=f"fast_mcp_{self.agent_id}_{tool_name}_{int(time.time() * 1000)}",
+            name=tool_name,
+            arguments=arguments,
+        )
+        if not isinstance(result, dict):
+            raise RuntimeError(f"MCP tool {tool_name} returned unexpected result type")
+        if result.get("status") not in {None, "success"}:
+            raise RuntimeError(f"MCP tool {tool_name} returned status {result.get('status')}")
+        return result
+
+    def _combine_fast_mcp_outputs(self, tool_names: list[str], raw_outputs: list[str]) -> str:
+        cleaned_outputs = [self._strip_embedded_diagram_json(output).strip() for output in raw_outputs]
+        if len(cleaned_outputs) == 1:
+            return cleaned_outputs[0]
+        sections = []
+        for tool_name, output in zip(tool_names, cleaned_outputs):
+            sections.append(f"Tool result from {tool_name}:\n{output}")
+        return "\n\n".join(sections)
+
+    async def _format_fast_mcp_response_with_llm(
+        self,
+        problem: str,
+        plan: Optional[Dict[str, Any]],
+        tool_names: list[str],
+        tool_output: str,
+    ) -> Optional[str]:
+        """Optionally rewrite MCP output with a compact tutor voice."""
+        if not self.fast_mcp_explain_with_llm:
+            return None
+
+        prompt = (
+            "You are a physics tutor. Use only the MCP tool output below to answer the student. "
+            "Be concise, show the key equation, keep units, and do not invent new numbers. "
+            "If the tool output says information is missing, ask for exactly that information.\n\n"
+            f"Student question:\n{problem}\n\n"
+            f"Planner:\n{json.dumps(plan or {}, ensure_ascii=True)[:1200]}\n\n"
+            f"MCP tools used: {', '.join(tool_names)}\n\n"
+            f"MCP output:\n{self._strip_embedded_diagram_json(tool_output)[:6000]}"
+        )
+        try:
+            response = await asyncio.to_thread(
+                self._request_ollama_generate,
+                prompt,
+                self.fast_mcp_explain_timeout_seconds,
+                900,
+                False,
+                self.model_id,
+            )
+        except Exception as exc:
+            logger.info("Fast MCP explanation rewrite unavailable for %s: %s", self.agent_id, exc)
+            return None
+        return self._strip_embedded_diagram_json(response).strip() or None
+
+    def _fast_mcp_tool_catalog(self) -> list[Dict[str, Any]]:
+        """Compact tool catalog used by the LLM router."""
+        catalogs: Dict[str, list[Dict[str, Any]]] = {
+            "kinematics_agent": [
+                {
+                    "name": "uniform_motion_1d",
+                    "use_when": "constant velocity, x = x0 + vt",
+                    "arguments": {"known_values": {"x0": "m optional", "x": "m optional", "v": "m/s optional", "t": "s optional"}},
+                },
+                {
+                    "name": "constant_acceleration_1d",
+                    "use_when": "1D constant acceleration with v0, v, a, x, x0, or t",
+                    "arguments": {"known_values": {"x0": "m optional", "x": "m optional", "v0": "m/s optional", "v": "m/s optional", "a": "m/s^2 optional", "t": "s optional"}},
+                },
+                {
+                    "name": "free_fall_motion",
+                    "use_when": "vertical motion under gravity",
+                    "arguments": {"known_values": {"y0": "m optional", "y": "m optional", "v0": "m/s optional", "v": "m/s optional", "t": "s optional"}, "gravity": 9.81},
+                },
+                {
+                    "name": "projectile_motion_2d",
+                    "use_when": "2D projectile trajectory, range, max height, time of flight, graph",
+                    "arguments": {"launch_conditions": {"v0": "m/s", "angle": "degrees", "h0": "m optional", "x0": "m optional", "gravity": 9.81}, "target_info": "optional object"},
+                },
+                {
+                    "name": "projectile_velocity_animation",
+                    "use_when": "projectile velocity vectors or animation frames",
+                    "arguments": {"launch_conditions": {"v0": "m/s", "angle": "degrees", "h0": "m optional", "x0": "m optional", "gravity": 9.81}, "frames": 18},
+                },
+                {
+                    "name": "motion_graphs",
+                    "use_when": "position, velocity, or acceleration graph over time",
+                    "arguments": {"motion_type": "constant_velocity|constant_acceleration", "parameters": {"x0": "m optional", "v0": "m/s optional", "v": "m/s optional", "a": "m/s^2 optional"}, "time_range": "start,end,step"},
+                },
+                {
+                    "name": "relative_motion_1d",
+                    "use_when": "relative velocity or motion between observers/objects",
+                    "arguments": {"objects_data": "object with object velocities and reference frame"},
+                },
+            ],
+            "forces_agent": [
+                {
+                    "name": "newton_second_law",
+                    "use_when": "F = ma, find net force, mass, or acceleration from two known values",
+                    "arguments": {"newton_data": {"force": "N optional", "mass": "kg optional", "acceleration": "m/s^2 optional"}},
+                },
+                {
+                    "name": "calculate_spring_force_tool",
+                    "use_when": "Hooke's law spring force",
+                    "arguments": {"spring_data": {"spring_constant": "N/m", "displacement": "m"}},
+                },
+                {
+                    "name": "calculate_friction_force_tool",
+                    "use_when": "friction force f = mu N",
+                    "arguments": {"coefficient": "mu", "normal_force": "N", "force_type": "kinetic|static"},
+                },
+                {
+                    "name": "resolve_force_components",
+                    "use_when": "resolve one force vector into x and y components",
+                    "arguments": {"magnitude": "N", "angle_degrees": "degrees from +x"},
+                },
+                {
+                    "name": "add_forces_1d",
+                    "use_when": "sum one-dimensional forces",
+                    "arguments": {"forces": "JSON array of signed forces in N"},
+                },
+                {
+                    "name": "add_forces_2d",
+                    "use_when": "sum multiple 2D force vectors",
+                    "arguments": {"forces_data": [{"magnitude": "N", "angle_degrees": "degrees from +x", "name": "optional"}]},
+                },
+                {
+                    "name": "create_free_body_diagram",
+                    "use_when": "free-body diagram for an object with listed forces",
+                    "arguments": {"object_name": "object name", "forces_data": [{"name": "force name", "magnitude": "N", "direction": "up/down/left/right or angle"}]},
+                },
+                {
+                    "name": "check_equilibrium",
+                    "use_when": "determine whether forces balance",
+                    "arguments": {"forces_data": "JSON array of forces"},
+                },
+                {
+                    "name": "calculate_weight_force",
+                    "use_when": "weight W = mg",
+                    "arguments": {"mass": "kg", "gravity": 9.81},
+                },
+                {
+                    "name": "analyze_forces_on_incline",
+                    "use_when": "box/block/object on ramp or incline, with or without friction",
+                    "arguments": {"mass": "kg", "angle_degrees": "degrees", "coefficient_friction": "mu optional", "gravity": 9.81},
+                },
+                {
+                    "name": "analyze_tension_forces",
+                    "use_when": "ropes, strings, pulleys, or tension systems",
+                    "arguments": {"masses": "JSON array/object of masses", "angles": "JSON array/object of angles", "gravity": 9.81},
+                },
+            ],
+            "math_agent": [
+                {
+                    "name": "resolve_vector_components",
+                    "use_when": "resolve vector, force, velocity, or displacement into x/y components",
+                    "arguments": {"magnitude": "number", "angle_degrees": "standard angle from +x", "units": "N, m/s, m, or units"},
+                },
+                {
+                    "name": "solve_linear_equation",
+                    "use_when": "solve one linear equation",
+                    "arguments": {"equation": "equation string"},
+                },
+                {
+                    "name": "solve_quadratic_equation",
+                    "use_when": "solve one quadratic equation",
+                    "arguments": {"equation": "equation string"},
+                },
+                {
+                    "name": "trigonometry_calculator",
+                    "use_when": "sin, cos, tan, inverse trig",
+                    "arguments": {"function": "sin|cos|tan|asin|acos|atan", "value": "number", "unit": "degrees|radians"},
+                },
+                {
+                    "name": "solve_for_variable",
+                    "use_when": "symbolically isolate one variable in an equation",
+                    "arguments": {"equation": "equation string", "solve_for": "variable"},
+                },
+                {
+                    "name": "physics_formula_solver",
+                    "use_when": "solve a common physics formula numerically, including d = vt constant-velocity distance",
+                    "arguments": {"formula_name": "kinetic_energy|force|uniform_motion", "known_values": "JSON object", "solve_for": "variable"},
+                },
+                {
+                    "name": "algebra_simplify",
+                    "use_when": "simplify or rearrange an expression",
+                    "arguments": {"expression": "expression string"},
+                },
+                {
+                    "name": "unit_converter",
+                    "use_when": "convert Physics 101 units such as km/h to m/s, cm to m, minutes to seconds",
+                    "arguments": {"value": "number", "from_unit": "unit string", "to_unit": "unit string"},
+                },
+            ],
+            "momentum_agent": [
+                {"name": "calculate_momentum_1d", "use_when": "1D momentum p=mv", "arguments": {"mass": "kg", "velocity": "m/s"}},
+                {"name": "calculate_momentum_2d", "use_when": "2D momentum components", "arguments": {"mass": "kg", "velocity": "m/s", "angle_degrees": "degrees from +x"}},
+                {"name": "calculate_impulse_1d", "use_when": "impulse from force and time or momentum change", "arguments": {"force": "N optional", "time": "s optional", "initial_momentum": "kg*m/s optional", "final_momentum": "kg*m/s optional"}},
+                {"name": "calculate_impulse_2d", "use_when": "2D impulse from force components and time or momentum change", "arguments": {"force_data": "JSON object", "time": "s optional", "momentum_data": "JSON object optional"}},
+                {"name": "momentum_impulse_theorem", "use_when": "impulse-momentum theorem", "arguments": {"problem_data": "JSON object"}},
+                {"name": "momentum_conservation_1d", "use_when": "1D collision or explosion conservation", "arguments": {"collision_data": "JSON object"}},
+                {"name": "momentum_conservation_2d", "use_when": "2D momentum conservation", "arguments": {"collision_data": "JSON object"}},
+                {"name": "analyze_collision", "use_when": "collision analysis with scenario text/data", "arguments": {"collision_scenario": "JSON object or scenario string"}},
+            ],
+            "energy_agent": [
+                {"name": "calculate_kinetic_energy_tool", "use_when": "kinetic energy K=1/2mv^2", "arguments": {"mass": "kg", "velocity": "m/s"}},
+                {"name": "calculate_gravitational_potential_energy_tool", "use_when": "gravitational potential energy mgh", "arguments": {"mass": "kg", "height": "m", "gravity": 9.81, "reference_level": "ground"}},
+                {"name": "calculate_elastic_potential_energy_tool", "use_when": "spring potential energy", "arguments": {"spring_constant": "N/m", "displacement": "m"}},
+                {"name": "calculate_work_tool", "use_when": "work W=Fd cos theta", "arguments": {"force": "N", "displacement": "m", "angle_degrees": "degrees optional", "force_type": "constant"}},
+                {"name": "work_energy_theorem", "use_when": "work-energy theorem", "arguments": {"problem_data": "JSON object"}},
+                {"name": "energy_conservation", "use_when": "mechanical energy conservation", "arguments": {"system_data": "JSON object"}},
+                {"name": "energy_with_friction", "use_when": "energy with friction or dissipated energy", "arguments": {"friction_data": "JSON object"}},
+                {"name": "analyze_energy_system", "use_when": "multi-point energy system or roller coaster diagram", "arguments": {"system_data": "JSON object"}},
+            ],
+            "thermodynamics_agent": [
+                {"name": "ideal_gas_law", "use_when": "PV=nRT", "arguments": {"gas_data": "JSON object"}},
+                {"name": "heat_transfer", "use_when": "Q=mc delta T", "arguments": {"heat_data": "JSON object"}},
+                {"name": "thermal_expansion", "use_when": "linear/area/volume thermal expansion", "arguments": {"expansion_data": "JSON object"}},
+                {"name": "heat_conduction", "use_when": "Fourier heat conduction", "arguments": {"conduction_data": "JSON object"}},
+                {"name": "carnot_efficiency", "use_when": "Carnot engine efficiency", "arguments": {"carnot_data": "JSON object"}},
+            ],
+            "waves_agent": [
+                {"name": "wave_equation", "use_when": "v=f lambda wave speed/frequency/wavelength", "arguments": {"wave_data": "JSON object"}},
+                {"name": "doppler_effect", "use_when": "Doppler effect", "arguments": {"doppler_data": "JSON object"}},
+                {"name": "sound_intensity_decibels", "use_when": "sound intensity and decibels", "arguments": {"sound_data": "JSON object"}},
+                {"name": "standing_waves", "use_when": "standing waves and harmonics", "arguments": {"standing_wave_data": "JSON object"}},
+                {"name": "wave_interference", "use_when": "double slit, interference, path difference", "arguments": {"interference_data": "JSON object"}},
+            ],
+            "angular_motion_agent": [
+                {"name": "angular_kinematics", "use_when": "angular displacement, velocity, acceleration", "arguments": {"kinematics_data": "JSON object"}},
+                {"name": "calculate_moment_of_inertia", "use_when": "moment of inertia", "arguments": {"object_data": "JSON object"}},
+                {"name": "calculate_torque", "use_when": "torque", "arguments": {"torque_data": "JSON object"}},
+                {"name": "angular_momentum_conservation", "use_when": "angular momentum conservation", "arguments": {"momentum_data": "JSON object"}},
+                {"name": "rotational_energy", "use_when": "rotational kinetic energy", "arguments": {"energy_data": "JSON object"}},
+                {"name": "angular_impulse_momentum", "use_when": "angular impulse-momentum", "arguments": {"impulse_data": "JSON object"}},
+                {"name": "rolling_motion_analysis", "use_when": "rolling motion", "arguments": {"rolling_data": "JSON object"}},
+                {"name": "circular_motion", "use_when": "centripetal/circular motion", "arguments": {"circular_data": "JSON object"}},
+                {"name": "simple_harmonic_motion", "use_when": "SHM spring or pendulum", "arguments": {"shm_data": "JSON object"}},
+            ],
+            "electromagnetism_agent": [
+                {"name": "coulombs_law", "use_when": "Coulomb force", "arguments": {"coulomb_data": "JSON object"}},
+                {"name": "electric_field", "use_when": "electric field", "arguments": {"field_data": "JSON object"}},
+                {"name": "electric_potential", "use_when": "electric potential", "arguments": {"potential_data": "JSON object"}},
+                {"name": "capacitance", "use_when": "capacitance", "arguments": {"capacitor_data": "JSON object"}},
+                {"name": "ohms_law", "use_when": "Ohm's law circuit", "arguments": {"circuit_data": "JSON object"}},
+                {"name": "resistor_network", "use_when": "series/parallel resistor network", "arguments": {"network_data": "JSON object"}},
+                {"name": "magnetic_force", "use_when": "magnetic force on charge or wire", "arguments": {"magnetic_data": "JSON object"}},
+                {"name": "magnetic_field_wire", "use_when": "magnetic field from wire", "arguments": {"wire_data": "JSON object"}},
+                {"name": "faradays_law", "use_when": "Faraday induction", "arguments": {"faraday_data": "JSON object"}},
+            ],
+            "optics_agent": [
+                {"name": "snells_law", "use_when": "refraction Snell's law", "arguments": {"refraction_data": "JSON object"}},
+                {"name": "lens_mirror_equation", "use_when": "thin lens or mirror equation", "arguments": {"optics_data": "JSON object"}},
+                {"name": "diffraction_grating", "use_when": "diffraction grating", "arguments": {"diffraction_data": "JSON object"}},
+                {"name": "thin_film_interference", "use_when": "thin film interference", "arguments": {"film_data": "JSON object"}},
+                {"name": "optical_power_diopters", "use_when": "optical power in diopters", "arguments": {"power_data": "JSON object"}},
+            ],
+            "modern_physics_agent": [
+                {"name": "time_dilation", "use_when": "special relativity time dilation", "arguments": {"relativity_data": "JSON object"}},
+                {"name": "length_contraction", "use_when": "special relativity length contraction", "arguments": {"contraction_data": "JSON object"}},
+                {"name": "relativistic_energy_momentum", "use_when": "relativistic energy/momentum", "arguments": {"energy_data": "JSON object"}},
+                {"name": "photoelectric_effect", "use_when": "photoelectric effect", "arguments": {"photo_data": "JSON object"}},
+                {"name": "de_broglie_wavelength", "use_when": "de Broglie matter waves", "arguments": {"matter_wave_data": "JSON object"}},
+                {"name": "bohr_model", "use_when": "Bohr model hydrogen", "arguments": {"bohr_data": "JSON object"}},
+                {"name": "radioactive_decay", "use_when": "radioactive decay", "arguments": {"decay_data": "JSON object"}},
+            ],
+        }
+        return catalogs.get(self.agent_id, [])
+
     def _extract_solution_text(self, result: Any) -> str:
         """Extract assistant text from a Strands response object."""
         solution = ""
@@ -967,15 +1824,14 @@ class StrandsPhysicsAgent(ABC):
             return None
 
         mass_match = re.search(r"(-?\d+(?:\.\d+)?)\s*kg", lower)
-        angle_match = re.search(r"(-?\d+(?:\.\d+)?)\s*(?:°|degrees?)", lower)
-        mu_match = re.search(r"(?:coefficient(?:\s+of)?\s+friction|mu)\s*(?:=|of)?\s*(-?\d+(?:\.\d+)?)", lower)
+        angle_match = re.search(r"(-?\d+(?:\.\d+)?)\s*(?:°|degrees?\b|deg\b)", lower)
+        mu = self._parse_friction_coefficient(lower)
 
         if not mass_match or not angle_match:
             return None
 
         mass = float(mass_match.group(1))
         angle = float(angle_match.group(1))
-        mu = float(mu_match.group(1)) if mu_match else 0.0
 
         recovery_prompt = (
             "Call the MCP tool analyze_forces_on_incline with exactly these values and no substitutions: "
@@ -991,6 +1847,168 @@ class StrandsPhysicsAgent(ABC):
         except Exception as e:
             logger.warning(f"Forces diagram recovery failed: {e}")
             return None
+
+    def _parse_friction_coefficient(self, lower_problem: str) -> float:
+        return self._first_float_match(
+            lower_problem,
+            [
+                (
+                    r"(?:coefficient(?:\s+of)?\s+(?:kinetic\s+|static\s+)?friction|friction\s+coefficient)"
+                    r"(?:\s*(?:μ|mu)\s*[_\s]?[ks]?)?\s*(?:=|is|of|:)?\s*(-?\d+(?:\.\d+)?)"
+                ),
+                r"(?:μ|mu)\s*[_\s]?[ks]?\s*(?:=|is|:)?\s*(-?\d+(?:\.\d+)?)",
+            ],
+        ) or 0.0
+
+    def _parse_incline_parameters(self, problem: str) -> Optional[Dict[str, float]]:
+        lower = problem.lower()
+        mass = self._first_float_match(lower, [r"(-?\d+(?:\.\d+)?)\s*kg\b"])
+        angle_degrees = self._first_float_match(lower, [r"(-?\d+(?:\.\d+)?)\s*(?:°|degrees?\b|deg\b)"])
+        if mass is None or angle_degrees is None:
+            return None
+
+        gravity = self._first_float_match(
+            lower,
+            [r"(?:gravity|g)\s*(?:=|is|of|:)?\s*(-?\d+(?:\.\d+)?)\s*(?:m\s*/\s*s\^?2|mps2)?"],
+        ) or 9.81
+
+        return {
+            "mass": float(mass),
+            "angle_degrees": float(angle_degrees),
+            "coefficient_friction": float(self._parse_friction_coefficient(lower)),
+            "gravity": float(gravity),
+        }
+
+    def _call_incline_mcp_tool(self, problem: str) -> Optional[Dict[str, Any]]:
+        parsed = self._parse_incline_parameters(problem)
+        if not parsed or not self.mcp_client:
+            return None
+
+        try:
+            tool_result = self._call_mcp_tool_direct("analyze_forces_on_incline", parsed)
+        except Exception as exc:
+            logger.warning("Incline MCP fallback failed: %s", exc)
+            return None
+
+        raw_solution = self._extract_text_from_mcp_tool_result(tool_result)
+        if not raw_solution:
+            return None
+        return {
+            "solution": raw_solution,
+            "diagram": self._extract_diagram_from_text(raw_solution),
+            "source": "mcp",
+        }
+
+    def _call_spring_force_mcp_tool(self, problem: str) -> Optional[Dict[str, Any]]:
+        parsed = self._parse_spring_parameters(problem)
+        if not parsed or not self.mcp_client:
+            return None
+
+        spring_constant_n_per_m, displacement_m, _ = parsed
+        arguments = {
+            "spring_data": json.dumps(
+                {
+                    "spring_constant": spring_constant_n_per_m,
+                    "displacement": displacement_m,
+                }
+            )
+        }
+
+        try:
+            tool_result = self._call_mcp_tool_direct("calculate_spring_force_tool", arguments)
+        except Exception as exc:
+            logger.warning("Spring MCP fallback failed: %s", exc)
+            return None
+
+        raw_solution = self._extract_text_from_mcp_tool_result(tool_result)
+        if not raw_solution:
+            return None
+
+        return {
+            "solution": self._strip_embedded_diagram_json(raw_solution).strip(),
+            "diagram": self._extract_diagram_from_text(raw_solution),
+            "source": "mcp",
+            "calculation": {
+                "spring_constant_n_per_m": spring_constant_n_per_m,
+                "displacement_m": displacement_m,
+                "force_magnitude_n": abs(spring_constant_n_per_m * displacement_m),
+                "restoring_force_n": -spring_constant_n_per_m * displacement_m,
+                "law": "F_s = -kx",
+            },
+        }
+
+    def _call_free_body_diagram_mcp_tool(self, problem: str) -> Optional[Dict[str, Any]]:
+        if not self.mcp_client:
+            return None
+
+        object_name = self._parse_free_body_object(problem)
+        forces = self._infer_free_body_forces(problem)
+        if not forces:
+            return None
+
+        mcp_forces = [
+            {
+                "name": force.get("name", "Force"),
+                "magnitude": float(force.get("magnitude_n", 0.0)),
+                "angle": float(force.get("angle_deg", 0.0)),
+            }
+            for force in forces
+        ]
+
+        try:
+            tool_result = self._call_mcp_tool_direct(
+                "create_free_body_diagram",
+                {
+                    "object_name": object_name,
+                    "forces_data": json.dumps(mcp_forces),
+                },
+            )
+        except Exception as exc:
+            logger.warning("Free-body MCP fallback failed: %s", exc)
+            return None
+
+        raw_solution = self._extract_text_from_mcp_tool_result(tool_result)
+        if not raw_solution:
+            return None
+        return {
+            "solution": raw_solution,
+            "diagram": self._extract_diagram_from_text(raw_solution),
+            "source": "mcp",
+        }
+
+    def _build_inclined_plane_diagram_fallback(self, problem: str) -> Optional[Dict[str, Any]]:
+        """Build an inclined-plane FBD payload without waiting for an LLM/tool call."""
+        parsed = self._parse_incline_parameters(problem)
+        if not parsed:
+            return None
+
+        mass = parsed["mass"]
+        angle_degrees = parsed["angle_degrees"]
+        gravity = parsed["gravity"]
+        coefficient_friction = parsed["coefficient_friction"]
+
+        angle_rad = math.radians(angle_degrees)
+        weight = mass * gravity
+        weight_parallel = weight * math.sin(angle_rad)
+        weight_perpendicular = weight * math.cos(angle_rad)
+        normal_force = weight_perpendicular
+        friction_force = coefficient_friction * normal_force if coefficient_friction > 0 else 0.0
+        net_down = weight_parallel - friction_force
+
+        return {
+            "type": "inclined_plane_diagram",
+            "title": "Free-Body Diagram: Box on Incline",
+            "mass_kg": float(mass),
+            "angle_deg": float(angle_degrees),
+            "coefficient_friction": float(coefficient_friction),
+            "weight_n": float(weight),
+            "weight_parallel_n": float(weight_parallel),
+            "weight_perpendicular_n": float(weight_perpendicular),
+            "normal_n": float(normal_force),
+            "net_down_n": float(net_down),
+            "has_friction": coefficient_friction > 0,
+            "friction_n": float(friction_force),
+        }
 
     def _build_free_body_diagram_fallback(self, problem: str) -> Optional[Dict[str, Any]]:
         """Build a simple free-body diagram payload from explicit prompt details."""
@@ -1168,6 +2186,37 @@ class StrandsPhysicsAgent(ABC):
         except Exception as e:
             logger.warning(f"Kinematics diagram recovery failed for {required_tool}: {e}")
             return None
+
+    def _call_projectile_mcp_tool(self, problem: str, required_tool: str) -> Optional[Dict[str, Any]]:
+        launch = self._parse_projectile_launch(problem)
+        if not launch or not self.mcp_client:
+            return None
+
+        launch_conditions = {
+            "v0": launch["v0"],
+            "angle": launch["angle"],
+            "h0": launch.get("h0", 0.0),
+            "x0": launch.get("x0", 0.0),
+            "gravity": launch.get("gravity", 9.81),
+        }
+        arguments: Dict[str, Any] = {"launch_conditions": json.dumps(launch_conditions)}
+        if required_tool == "projectile_velocity_animation":
+            arguments["frames"] = 18
+
+        try:
+            tool_result = self._call_mcp_tool_direct(required_tool, arguments)
+        except Exception as exc:
+            logger.warning("Projectile MCP fallback failed for %s: %s", required_tool, exc)
+            return None
+
+        raw_solution = self._extract_text_from_mcp_tool_result(tool_result)
+        if not raw_solution:
+            return None
+        return {
+            "solution": raw_solution,
+            "diagram": self._extract_diagram_from_text(raw_solution),
+            "source": "mcp",
+        }
 
     def _build_projectile_diagram_fallback(self, problem: str, required_tool: str) -> Optional[Dict[str, Any]]:
         """Build projectile diagram data when the model path is unavailable."""
@@ -1535,6 +2584,349 @@ class StrandsPhysicsAgent(ABC):
             or "fbd" in lower
         )
 
+    def _is_physics_algebra_exercise_request(self, problem: str) -> bool:
+        lower = problem.lower()
+        asks_for_practice = any(
+            keyword in lower
+            for keyword in (
+                "exercise",
+                "exercises",
+                "practice",
+                "worksheet",
+                "quiz",
+                "drill",
+                "problems",
+            )
+        )
+        physics_algebra_context = any(
+            keyword in lower
+            for keyword in (
+                "physics",
+                "formula",
+                "formulas",
+                "equation",
+                "equations",
+                "algebra",
+                "rearrange",
+                "rearranging",
+                "solve for",
+                "isolate",
+            )
+        )
+        return asks_for_practice and physics_algebra_context
+
+    def _is_vector_components_request(self, problem: str) -> bool:
+        parsed = self._parse_vector_components_request(problem)
+        return parsed is not None
+
+    def _call_vector_components_mcp_tool(self, problem: str) -> Optional[Dict[str, Any]]:
+        parsed = self._parse_vector_components_request(problem)
+        if not parsed or not self.mcp_client:
+            return None
+
+        tool_result = self.mcp_client.call_tool_sync(
+            tool_use_id=f"math_vector_components_{int(time.time() * 1000)}",
+            name="resolve_vector_components",
+            arguments={
+                "magnitude": parsed["magnitude"],
+                "angle_degrees": parsed["angle_degrees"],
+                "units": parsed["units"],
+            },
+        )
+        if not isinstance(tool_result, dict) or tool_result.get("status") != "success":
+            logger.warning("Math MCP resolve_vector_components failed: %s", tool_result)
+            return None
+
+        raw_solution = self._extract_text_from_mcp_tool_result(tool_result)
+        if not raw_solution:
+            return None
+
+        return {
+            "solution": self._strip_embedded_diagram_json(raw_solution).strip(),
+            "diagram": self._extract_diagram_from_text(raw_solution),
+        }
+
+    def _parse_vector_components_request(self, problem: str) -> Optional[Dict[str, Any]]:
+        lower = problem.lower()
+        asks_for_components = any(
+            keyword in lower
+            for keyword in (
+                "component",
+                "components",
+                "resolve",
+                "break down",
+                "decompose",
+                "split",
+            )
+        )
+        vector_context = any(keyword in lower for keyword in ("vector", "force", "velocity", "displacement"))
+        if not asks_for_components or not vector_context:
+            return None
+
+        magnitude_with_units = self._parse_vector_magnitude_and_units(lower)
+        angle_match = re.search(r"(-?\d+(?:\.\d+)?)\s*(?:°|degrees?\b|deg\b)", lower)
+        if not magnitude_with_units or not angle_match:
+            return None
+
+        magnitude, units = magnitude_with_units
+        raw_angle = float(angle_match.group(1))
+        return {
+            "magnitude": float(magnitude),
+            "angle_degrees": float(self._standardize_vector_angle(lower, raw_angle)),
+            "units": units,
+        }
+
+    def _parse_vector_magnitude_and_units(self, lower_problem: str) -> Optional[tuple[float, str]]:
+        unit_patterns = [
+            (r"(-?\d+(?:\.\d+)?)\s*(?:n|newtons?)\b", "N"),
+            (r"(-?\d+(?:\.\d+)?)\s*(?:m\s*/\s*s|m/s|meters?\s+per\s+second)\b", "m/s"),
+            (r"(-?\d+(?:\.\d+)?)\s*(?:m|meters?)\b", "m"),
+        ]
+        for pattern, units in unit_patterns:
+            match = re.search(pattern, lower_problem)
+            if match:
+                return float(match.group(1)), units
+
+        magnitude = self._first_float_match(
+            lower_problem,
+            [
+                r"(?:magnitude|length|size)\s*(?:=|is|of|:)?\s*(-?\d+(?:\.\d+)?)\b",
+                r"\bvector\s*(?:=|is|of|with)?\s*(-?\d+(?:\.\d+)?)\b",
+            ],
+        )
+        return (magnitude, "units") if magnitude is not None else None
+
+    def _standardize_vector_angle(self, lower_problem: str, angle_degrees: float) -> float:
+        direction_text = (
+            lower_problem.replace("positive x", "+x")
+            .replace("positive y", "+y")
+            .replace("negative x", "-x")
+            .replace("negative y", "-y")
+            .replace("plus x", "+x")
+            .replace("plus y", "+y")
+            .replace("minus x", "-x")
+            .replace("minus y", "-y")
+        )
+
+        if "clockwise" in direction_text and "+x" in direction_text:
+            return (-angle_degrees) % 360.0
+        if "above" in direction_text and "-x" in direction_text:
+            return (180.0 - angle_degrees) % 360.0
+        if "below" in direction_text and "-x" in direction_text:
+            return (180.0 + angle_degrees) % 360.0
+        if "below" in direction_text and "+x" in direction_text:
+            return (-angle_degrees) % 360.0
+        if "right of" in direction_text and "+y" in direction_text:
+            return (90.0 - angle_degrees) % 360.0
+        if "left of" in direction_text and "+y" in direction_text:
+            return (90.0 + angle_degrees) % 360.0
+        if "right of" in direction_text and "-y" in direction_text:
+            return (270.0 + angle_degrees) % 360.0
+        if "left of" in direction_text and "-y" in direction_text:
+            return (270.0 - angle_degrees) % 360.0
+        return angle_degrees % 360.0
+
+    def _extract_text_from_mcp_tool_result(self, tool_result: Dict[str, Any]) -> str:
+        content = tool_result.get("content")
+        if isinstance(content, list):
+            text_parts = [
+                str(block.get("text"))
+                for block in content
+                if isinstance(block, dict) and isinstance(block.get("text"), str)
+            ]
+            return "\n".join(text_parts).strip()
+        if isinstance(content, str):
+            return content.strip()
+        return ""
+
+    def _build_physics_algebra_exercises(self, problem: str) -> Dict[str, Any]:
+        lower = problem.lower()
+        count = self._parse_exercise_count(lower, default=5, minimum=1, maximum=10)
+        difficulty = self._parse_practice_difficulty(lower)
+        topic = self._parse_physics_algebra_topic(lower)
+        include_answer_key = self._should_include_answer_key(lower)
+
+        exercises = self._select_physics_algebra_exercises(topic, difficulty, count)
+        lines = [
+            "Physics Algebra Practice",
+            "",
+            "Rearrange the equation symbolically first, then substitute numbers. Try not to jump straight to arithmetic.",
+            "",
+            "Exercises:",
+        ]
+        for idx, exercise in enumerate(exercises, start=1):
+            lines.extend(
+                [
+                    f"{idx}. {exercise['title']} ({exercise['topic']})",
+                    f"   Formula: {exercise['formula']}",
+                    f"   Task: {exercise['task']}",
+                ]
+            )
+
+        if include_answer_key:
+            lines.extend(["", "Answer key:"])
+            for idx, exercise in enumerate(exercises, start=1):
+                lines.append(f"{idx}. {exercise['answer']}")
+        else:
+            lines.extend(
+                [
+                    "",
+                    "When you finish, send your answers like: Exercise 1: a = ... . I can check them one at a time.",
+                    "If you want the key, ask for the answer key after trying them.",
+                ]
+            )
+
+        return {
+            "solution": "\n".join(lines),
+            "topic": topic,
+            "difficulty": difficulty,
+            "exercise_count": len(exercises),
+            "includes_answer_key": include_answer_key,
+        }
+
+    def _parse_exercise_count(self, lower_problem: str, default: int, minimum: int, maximum: int) -> int:
+        match = re.search(r"\b(\d{1,2})\b", lower_problem)
+        if not match:
+            return default
+        return max(minimum, min(maximum, int(match.group(1))))
+
+    def _parse_practice_difficulty(self, lower_problem: str) -> str:
+        if any(keyword in lower_problem for keyword in ("hard", "advanced", "challenge")):
+            return "challenge"
+        if any(keyword in lower_problem for keyword in ("easy", "beginner", "basic", "intro")):
+            return "basic"
+        return "mixed"
+
+    def _parse_physics_algebra_topic(self, lower_problem: str) -> str:
+        topic_keywords = {
+            "kinematics": ("kinematics", "motion", "velocity", "acceleration", "projectile"),
+            "forces": ("forces", "force", "newton", "friction", "incline", "normal", "tension"),
+            "energy": ("energy", "work", "kinetic", "potential", "spring"),
+            "momentum": ("momentum", "impulse", "collision"),
+        }
+        matches = [
+            topic
+            for topic, keywords in topic_keywords.items()
+            if any(keyword in lower_problem for keyword in keywords)
+        ]
+        return matches[0] if len(matches) == 1 else "mixed"
+
+    def _should_include_answer_key(self, lower_problem: str) -> bool:
+        return any(
+            phrase in lower_problem
+            for phrase in (
+                "with answers",
+                "include answers",
+                "answer key",
+                "with solutions",
+                "include solutions",
+                "show answers",
+                "show solutions",
+            )
+        )
+
+    def _select_physics_algebra_exercises(self, topic: str, difficulty: str, count: int) -> list[Dict[str, str]]:
+        exercises = self._physics_algebra_exercise_bank()
+        if topic != "mixed":
+            topic_matches = [exercise for exercise in exercises if exercise["topic"] == topic]
+            if topic_matches:
+                exercises = topic_matches + [exercise for exercise in exercises if exercise not in topic_matches]
+
+        if difficulty != "mixed":
+            difficulty_matches = [
+                exercise
+                for exercise in exercises
+                if exercise["difficulty"] in {difficulty, "mixed"}
+            ]
+            if difficulty_matches:
+                exercises = difficulty_matches + [exercise for exercise in exercises if exercise not in difficulty_matches]
+
+        return exercises[:count]
+
+    def _physics_algebra_exercise_bank(self) -> list[Dict[str, str]]:
+        return [
+            {
+                "title": "Net Force To Acceleration",
+                "topic": "forces",
+                "difficulty": "basic",
+                "formula": "F_net = m a",
+                "task": "A 6.0 kg cart has a net force of 18 N. Rearrange the formula to solve for a, then calculate a.",
+                "answer": "a = F_net / m = 18 N / 6.0 kg = 3.0 m/s^2",
+            },
+            {
+                "title": "Final Velocity Equation",
+                "topic": "kinematics",
+                "difficulty": "basic",
+                "formula": "v_f = v_0 + a t",
+                "task": "A runner speeds up from 2.0 m/s to 8.0 m/s in 3.0 s. Rearrange to solve for a, then calculate a.",
+                "answer": "a = (v_f - v_0) / t = (8.0 - 2.0) / 3.0 = 2.0 m/s^2",
+            },
+            {
+                "title": "Momentum Rearrangement",
+                "topic": "momentum",
+                "difficulty": "basic",
+                "formula": "p = m v",
+                "task": "An object has momentum 24 kg*m/s and speed 6.0 m/s. Rearrange to solve for m, then calculate m.",
+                "answer": "m = p / v = 24 / 6.0 = 4.0 kg",
+            },
+            {
+                "title": "Kinetic Energy To Speed",
+                "topic": "energy",
+                "difficulty": "mixed",
+                "formula": "K = (1/2) m v^2",
+                "task": "A 2.0 kg object has 25 J of kinetic energy. Rearrange to solve for v, then calculate the speed.",
+                "answer": "v = sqrt(2K / m) = sqrt(50 / 2.0) = 5.0 m/s",
+            },
+            {
+                "title": "Hooke's Law",
+                "topic": "forces",
+                "difficulty": "basic",
+                "formula": "F_s = k x",
+                "task": "A spring force has magnitude 15 N when stretched 0.30 m. Rearrange to solve for k, then calculate k.",
+                "answer": "k = F_s / x = 15 / 0.30 = 50 N/m",
+            },
+            {
+                "title": "Displacement With Constant Acceleration",
+                "topic": "kinematics",
+                "difficulty": "mixed",
+                "formula": "Delta x = v_0 t + (1/2) a t^2",
+                "task": "A cart starts from rest and travels 18 m in 6.0 s. Rearrange to solve for a, then calculate a.",
+                "answer": "a = 2 Delta x / t^2 = 2(18) / 6.0^2 = 1.0 m/s^2",
+            },
+            {
+                "title": "Work At An Angle",
+                "topic": "energy",
+                "difficulty": "mixed",
+                "formula": "W = F d cos(theta)",
+                "task": "A force does 120 J of work over 5.0 m at theta = 37 degrees. Rearrange to solve for F, then calculate F.",
+                "answer": "F = W / (d cos theta) = 120 / (5.0 cos 37 degrees) = 30 N",
+            },
+            {
+                "title": "Impulse To Time",
+                "topic": "momentum",
+                "difficulty": "mixed",
+                "formula": "J = F Delta t",
+                "task": "A 40 N force gives an impulse of 12 N*s. Rearrange to solve for Delta t, then calculate Delta t.",
+                "answer": "Delta t = J / F = 12 / 40 = 0.30 s",
+            },
+            {
+                "title": "No-Time Kinematics",
+                "topic": "kinematics",
+                "difficulty": "challenge",
+                "formula": "v_f^2 = v_0^2 + 2 a Delta x",
+                "task": "A cart goes from 3.0 m/s to 9.0 m/s over 12 m. Rearrange to solve for a, then calculate a.",
+                "answer": "a = (v_f^2 - v_0^2) / (2 Delta x) = (81 - 9) / 24 = 3.0 m/s^2",
+            },
+            {
+                "title": "Gravitational Potential Energy",
+                "topic": "energy",
+                "difficulty": "basic",
+                "formula": "U_g = m g h",
+                "task": "An object gains 147 J of gravitational potential energy when lifted 3.0 m. Rearrange to solve for m, then calculate m using g = 9.8 m/s^2.",
+                "answer": "m = U_g / (g h) = 147 / (9.8*3.0) = 5.0 kg",
+            },
+        ]
+
     def _is_diagram_request(self, problem: str) -> bool:
         lower = problem.lower()
         return any(keyword in lower for keyword in ("draw", "diagram", "graph", "plot", "trajectory", "animation"))
@@ -1670,14 +3062,16 @@ class StrandsPhysicsAgent(ABC):
             f"- Mass: {mass:.2f} kg",
             f"- Angle: {angle:.1f}°",
             f"- Coefficient of friction: {mu:.3f}",
-            f"- Weight: {weight:.2f} N",
-            f"- Weight component down incline (W_parallel): {w_parallel:.2f} N",
-            f"- Normal force: {normal:.2f} N",
+            "- Free-body diagram actual forces: weight straight down, normal perpendicular to the ramp, and kinetic friction up the ramp.",
+            "- The weight components are calculation aids, not extra forces on the box.",
+            f"- Weight: {weight:.2f} N straight down",
+            f"- Normal force: {normal:.2f} N perpendicular outward",
         ]
         if diagram.get("has_friction"):
             lines.append(f"- Friction force up incline: {friction:.2f} N")
         lines.extend(
             [
+                f"- Weight component down incline (W_parallel): {w_parallel:.2f} N",
                 f"- Net force down incline: {net_down:.2f} N",
                 f"- Acceleration magnitude: {accel:.2f} m/s²",
             ]

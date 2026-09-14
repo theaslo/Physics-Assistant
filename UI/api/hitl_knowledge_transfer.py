@@ -57,6 +57,7 @@ class KnowledgeTransferGate:
         self.pilot_agents = {a.strip() for a in pilot_agents_raw.split(",") if a.strip()}
 
         self._pending_checks: Dict[str, Dict[str, Any]] = {}
+        self._question_variant_counters: Dict[str, int] = {}
         self._mcp_client: Optional[MCPClient] = None
         self._mcp_agent: Optional[Agent] = None
         self._mcp_lock = asyncio.Lock()
@@ -179,13 +180,22 @@ class KnowledgeTransferGate:
             return None, self._finalize_trace("maybe_create_check", trace_stages, trace_started)
 
         stage_started = time.perf_counter()
-        kt_payload = await self._fetch_question_from_database(agent_id, concept_tag)
+        kt_payload = self._build_contextual_question(agent_id, concept_tag, problem)
         self._append_trace_stage(
             trace_stages,
-            "database_question_fetch",
+            "contextual_question_build",
             stage_started,
-            database_payload_received=bool(kt_payload),
+            contextual_payload_received=bool(kt_payload),
         )
+        if not kt_payload:
+            stage_started = time.perf_counter()
+            kt_payload = await self._fetch_question_from_database(agent_id, concept_tag)
+            self._append_trace_stage(
+                trace_stages,
+                "database_question_fetch",
+                stage_started,
+                database_payload_received=bool(kt_payload),
+            )
         if not kt_payload:
             stage_started = time.perf_counter()
             kt_payload = await self._fetch_question_from_mcp(agent_id, concept_tag, problem)
@@ -338,6 +348,7 @@ class KnowledgeTransferGate:
             pieces.append("")
             pieces.append("Before we continue: do you understand why this answer is not correct?")
             pieces.append('If you would like help, reply "next step" and I will guide you one step at a time.')
+            pieces.append("You can also attach a sketch of your setup, but please type the key labels, axes, or equations so I can check it.")
             guidance = "\n".join(pieces)
             remediation = {
                 "prompt": "Do you understand why this answer is not correct?",
@@ -401,32 +412,385 @@ class KnowledgeTransferGate:
             return "explicit_free_body_diagram_request"
         return None
 
+    def _build_question_payload(
+        self,
+        agent_type: str,
+        concept_tag: str,
+        question: str,
+        options: List[Dict[str, str]],
+        correct_option_id: str,
+        correct_feedback: str,
+        incorrect_feedback: str,
+        distractor_feedback: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        return {
+            "question_id": None,
+            "agent_type": agent_type,
+            "concept_tag": concept_tag,
+            "question": question,
+            "options": options,
+            "correct_option_id": correct_option_id,
+            "correct_feedback": correct_feedback,
+            "incorrect_feedback": incorrect_feedback,
+            "distractor_feedback": distractor_feedback or {},
+        }
+
+    def _short_problem_context(self, problem: str) -> str:
+        compact = re.sub(r"\s+", " ", problem or "").strip()
+        if len(compact) <= 140:
+            return compact
+        return f"{compact[:137].rstrip()}..."
+
+    def _next_question_variant(self, key: str, variants: List[str]) -> str:
+        if not variants:
+            return ""
+        current_index = self._question_variant_counters.get(key, 0)
+        self._question_variant_counters[key] = current_index + 1
+        return variants[current_index % len(variants)]
+
+    def _build_contextual_question(
+        self,
+        agent_id: str,
+        concept_tag: str,
+        problem: str,
+    ) -> Optional[Dict[str, Any]]:
+        problem_context = self._short_problem_context(problem)
+        if agent_id == "kinematics_agent":
+            return self._build_contextual_kinematics_question(concept_tag, problem, problem_context)
+        if agent_id == "forces_agent":
+            return self._build_contextual_forces_question(concept_tag, problem_context)
+        return None
+
+    def _build_contextual_kinematics_question(
+        self,
+        concept_tag: str,
+        problem: str,
+        problem_context: str,
+    ) -> Dict[str, Any]:
+        lower = problem.lower()
+        asks_peak = bool(re.search(r"\b(max(?:imum)? height|peak|highest)\b", lower))
+        asks_range = bool(re.search(r"\b(range|horizontal distance|how far)\b", lower))
+        asks_final_velocity = bool(re.search(r"\b(final velocity|final speed|v_f|vf)\b", lower))
+        asks_displacement = bool(re.search(r"\b(displacement|distance|position|how far)\b", lower))
+        asks_time = bool(re.search(r"\b(time|how long|flight time)\b", lower))
+        has_time = bool(re.search(r"\b\d+(?:\.\d+)?\s*(?:s|sec|secs|second|seconds)\b", lower))
+        has_acceleration = bool(re.search(r"\baccelerat(?:e|es|ed|ing|ion)\b|\bm/s\^?2\b", lower))
+        has_distance = bool(re.search(r"\b\d+(?:\.\d+)?\s*m\b", lower)) and not bool(re.search(r"\b\d+(?:\.\d+)?\s*m/s\b", lower))
+        projectile_like = concept_tag in {"projectile_components", "projectile_peak", "range_formula"}
+
+        if projectile_like and asks_peak:
+            return self._build_question_payload(
+                agent_type="kinematics",
+                concept_tag="projectile_peak",
+                question=self._next_question_variant(
+                    "kinematics_projectile_peak",
+                    [
+                        f"For this problem, what condition should you use at the projectile's highest point? ({problem_context})",
+                        f"At the top of this projectile's path, which statement should guide your setup? ({problem_context})",
+                        f"Which peak-height condition belongs in the vertical-motion equation here? ({problem_context})",
+                    ],
+                ),
+                options=[
+                    {"id": "A", "text": "v_y = 0 at the highest point"},
+                    {"id": "B", "text": "v_x = 0 at the highest point"},
+                    {"id": "C", "text": "a_y = 0 at the highest point"},
+                ],
+                correct_option_id="A",
+                correct_feedback="Correct: at the peak the vertical velocity is zero, while gravity still acts downward.",
+                incorrect_feedback="At the peak, only vertical velocity becomes zero. Horizontal velocity remains, and acceleration is still downward.",
+                distractor_feedback={
+                    "B": "The horizontal velocity does not become zero if air resistance is ignored.",
+                    "C": "Gravity is still acting, so vertical acceleration is not zero.",
+                },
+            )
+
+        if projectile_like and asks_range:
+            return self._build_question_payload(
+                agent_type="kinematics",
+                concept_tag="range_formula",
+                question=self._next_question_variant(
+                    "kinematics_projectile_range",
+                    [
+                        f"Before finding the horizontal range, which setup should you use for this projectile problem? ({problem_context})",
+                        f"Which plan correctly finds how far this projectile travels horizontally? ({problem_context})",
+                        f"What should you solve for first before calculating this projectile's range? ({problem_context})",
+                    ],
+                ),
+                options=[
+                    {"id": "A", "text": "Find flight time from vertical motion, then use x = v0x t"},
+                    {"id": "B", "text": "Use only y = v0 t because speed is constant"},
+                    {"id": "C", "text": "Set horizontal acceleration equal to g"},
+                ],
+                correct_option_id="A",
+                correct_feedback="Correct: vertical motion determines the time in the air, then horizontal motion gives the range.",
+                incorrect_feedback="Range needs the horizontal component and the flight time from vertical motion.",
+                distractor_feedback={
+                    "B": "Projectile speed is not constant vertically because gravity changes v_y.",
+                    "C": "Gravity acts vertically, not horizontally.",
+                },
+            )
+
+        if projectile_like:
+            return self._build_question_payload(
+                agent_type="kinematics",
+                concept_tag="projectile_components",
+                question=self._next_question_variant(
+                    "kinematics_projectile_components",
+                    [
+                        f"What is the best first setup step for this projectile problem? ({problem_context})",
+                        f"Before solving this projectile problem, what should you do with the launch velocity? ({problem_context})",
+                        f"Which setup correctly separates this projectile motion into horizontal and vertical parts? ({problem_context})",
+                    ],
+                ),
+                options=[
+                    {"id": "A", "text": "Split the launch speed into v0x = v0 cos(theta) and v0y = v0 sin(theta)"},
+                    {"id": "B", "text": "Use the full launch speed as the vertical velocity for the whole motion"},
+                    {"id": "C", "text": "Set gravity to zero because the ball is moving forward"},
+                ],
+                correct_option_id="A",
+                correct_feedback="Correct: projectile motion starts by separating horizontal and vertical components.",
+                incorrect_feedback="For angled launch, split the initial velocity into horizontal and vertical components before choosing equations.",
+                distractor_feedback={
+                    "B": "The launch speed is angled, so it is not all vertical.",
+                    "C": "Gravity still acts vertically throughout the motion.",
+                },
+            )
+
+        if asks_final_velocity and has_acceleration and has_time:
+            return self._build_question_payload(
+                agent_type="kinematics",
+                concept_tag="equation_selection",
+                question=self._next_question_variant(
+                    "kinematics_final_velocity_time",
+                    [
+                        f"Which kinematics equation fits this question best? ({problem_context})",
+                        f"To find final velocity here, which equation would you choose? ({problem_context})",
+                        f"Which equation connects final velocity, initial velocity, acceleration, and time for this problem? ({problem_context})",
+                    ],
+                ),
+                options=[
+                    {"id": "A", "text": "v_f = v_0 + a t"},
+                    {"id": "B", "text": "Delta x = v_0 t + (1/2) a t^2"},
+                    {"id": "C", "text": "v_f^2 = v_0^2 + 2 a Delta x"},
+                ],
+                correct_option_id="A",
+                correct_feedback="Correct: final velocity with known acceleration and time uses v_f = v_0 + at.",
+                incorrect_feedback="Choose the equation containing the unknown final velocity and the known acceleration and time.",
+                distractor_feedback={
+                    "B": "That equation is best when displacement is the unknown.",
+                    "C": "That equation is best when distance/displacement is known and time is not used.",
+                },
+            )
+
+        if asks_displacement and has_acceleration and has_time:
+            return self._build_question_payload(
+                agent_type="kinematics",
+                concept_tag="equation_selection",
+                question=self._next_question_variant(
+                    "kinematics_displacement_time",
+                    [
+                        f"Which equation should you start with for the displacement in this problem? ({problem_context})",
+                        f"To calculate displacement here, which kinematics equation uses the given time and acceleration? ({problem_context})",
+                        f"Which setup directly connects displacement with initial velocity, acceleration, and time? ({problem_context})",
+                    ],
+                ),
+                options=[
+                    {"id": "A", "text": "Delta x = v_0 t + (1/2) a t^2"},
+                    {"id": "B", "text": "v_f = v_0 + a t"},
+                    {"id": "C", "text": "F = m a"},
+                ],
+                correct_option_id="A",
+                correct_feedback="Correct: displacement with time and acceleration uses Delta x = v0 t + (1/2)at^2.",
+                incorrect_feedback="Use the equation that directly includes displacement, time, initial velocity, and acceleration.",
+                distractor_feedback={
+                    "B": "That finds final velocity, not displacement.",
+                    "C": "That is a force equation, not a kinematics equation.",
+                },
+            )
+
+        if asks_final_velocity and has_acceleration and has_distance and not has_time:
+            return self._build_question_payload(
+                agent_type="kinematics",
+                concept_tag="equation_selection",
+                question=self._next_question_variant(
+                    "kinematics_final_velocity_no_time",
+                    [
+                        f"Time is not the useful known here. Which kinematics equation should you use? ({problem_context})",
+                        f"Which equation finds final velocity when displacement and acceleration are available but time is not? ({problem_context})",
+                        f"Which no-time kinematics relation matches these knowns and unknowns? ({problem_context})",
+                    ],
+                ),
+                options=[
+                    {"id": "A", "text": "v_f^2 = v_0^2 + 2 a Delta x"},
+                    {"id": "B", "text": "v_f = v_0 + a t"},
+                    {"id": "C", "text": "Delta x = v_f t"},
+                ],
+                correct_option_id="A",
+                correct_feedback="Correct: the squared-velocity equation avoids time.",
+                incorrect_feedback="When time is not given, use the relation connecting velocities, acceleration, and displacement.",
+                distractor_feedback={
+                    "B": "This requires time, which is not the useful known.",
+                    "C": "This assumes constant velocity, which conflicts with acceleration.",
+                },
+            )
+
+        if asks_time:
+            return self._build_question_payload(
+                agent_type="kinematics",
+                concept_tag="equation_selection",
+                question=self._next_question_variant(
+                    "kinematics_solve_for_time",
+                    [
+                        f"Before solving for time, what should you choose first? ({problem_context})",
+                        f"Which setup step helps you solve for time without guessing? ({problem_context})",
+                        f"When time is the unknown, how should you choose the kinematics equation? ({problem_context})",
+                    ],
+                ),
+                options=[
+                    {"id": "A", "text": "The kinematics equation that contains time and the given known values"},
+                    {"id": "B", "text": "Any equation with velocity, even if it omits the unknown"},
+                    {"id": "C", "text": "Newton's Third Law"},
+                ],
+                correct_option_id="A",
+                correct_feedback="Correct: select the equation based on the unknown and the known quantities.",
+                incorrect_feedback="Equation choice should be driven by the unknown and which quantities are given.",
+                distractor_feedback={
+                    "B": "An equation that omits the unknown cannot solve the problem directly.",
+                    "C": "Newton's Third Law is not the kinematics setup for time.",
+                },
+            )
+
+        return self._build_question_payload(
+            agent_type="kinematics",
+            concept_tag="equation_selection",
+            question=self._next_question_variant(
+                "kinematics_equation_selection_general",
+                [
+                    f"What should you decide before calculating this kinematics problem? ({problem_context})",
+                    f"Before doing arithmetic, what setup choices matter most for this kinematics question? ({problem_context})",
+                    f"Which first step best prepares you to choose the right kinematics equation? ({problem_context})",
+                ],
+            ),
+            options=[
+                {"id": "A", "text": "List knowns/unknown, choose positive direction, then pick an equation containing those quantities"},
+                {"id": "B", "text": "Plug numbers into the first equation remembered"},
+                {"id": "C", "text": "Ignore signs because kinematics values are always positive"},
+            ],
+            correct_option_id="A",
+            correct_feedback="Correct: knowns, unknown, direction, and equation choice come before arithmetic.",
+            incorrect_feedback="Start with knowns, unknown, sign convention, and the equation that matches them.",
+            distractor_feedback={
+                "B": "The first remembered equation may not contain the unknown or the known quantities.",
+                "C": "Signs encode direction, so they matter in kinematics.",
+            },
+        )
+
+    def _build_contextual_forces_question(
+        self,
+        concept_tag: str,
+        problem_context: str,
+    ) -> Dict[str, Any]:
+        if concept_tag == "hookes_law":
+            return self._build_question_payload(
+                agent_type="forces",
+                concept_tag="hookes_law",
+                question=f"Which relation should you use first for this spring-force problem? ({problem_context})",
+                options=[
+                    {"id": "A", "text": "|F_s| = k |x|"},
+                    {"id": "B", "text": "|F_s| = |x| / k"},
+                    {"id": "C", "text": "|F_s| = k / |x|"},
+                ],
+                correct_option_id="A",
+                correct_feedback="Correct: spring force magnitude is proportional to displacement.",
+                incorrect_feedback="Hooke's law is linear in displacement.",
+                distractor_feedback={
+                    "B": "That inverts spring-constant dependence.",
+                    "C": "That is not linear in displacement.",
+                },
+            )
+
+        if concept_tag == "incline_components":
+            return self._build_question_payload(
+                agent_type="forces",
+                concept_tag="incline_components",
+                question=f"What is the most useful force setup for this ramp problem? ({problem_context})",
+                options=[
+                    {"id": "A", "text": "Choose axes parallel/perpendicular to the ramp and split weight into mg sin(theta), mg cos(theta)"},
+                    {"id": "B", "text": "Point the normal force straight upward because it balances weight"},
+                    {"id": "C", "text": "Use the full weight mg as the force down the ramp"},
+                ],
+                correct_option_id="A",
+                correct_feedback="Correct: incline axes make the weight components match the ramp directions.",
+                incorrect_feedback="For ramps, rotate the axes with the surface and split weight into parallel/perpendicular components.",
+                distractor_feedback={
+                    "B": "The normal force is perpendicular to the surface, not always vertical.",
+                    "C": "Only the parallel component of weight points down the ramp.",
+                },
+            )
+
+        if concept_tag == "newton_first_law":
+            return self._build_question_payload(
+                agent_type="forces",
+                concept_tag="newton_first_law",
+                question=f"What does Newton's First Law tell you to check first here? ({problem_context})",
+                options=[
+                    {"id": "A", "text": "Whether the net external force is zero or nonzero"},
+                    {"id": "B", "text": "Whether motion always requires a forward force"},
+                    {"id": "C", "text": "Whether the object's mass is zero"},
+                ],
+                correct_option_id="A",
+                correct_feedback="Correct: motion changes only when net external force is nonzero.",
+                incorrect_feedback="Newton's First Law is about net external force and changes in motion.",
+                distractor_feedback={
+                    "B": "Constant velocity does not require a net forward force.",
+                    "C": "Mass is not the first-law condition.",
+                },
+            )
+
+        if concept_tag == "newton_third_law":
+            return self._build_question_payload(
+                agent_type="forces",
+                concept_tag="newton_third_law",
+                question=f"Which statement correctly identifies a third-law pair for this kind of interaction? ({problem_context})",
+                options=[
+                    {"id": "A", "text": "The two forces act on different objects with equal magnitude and opposite direction"},
+                    {"id": "B", "text": "The two forces act on the same object and cancel"},
+                    {"id": "C", "text": "The larger object always exerts the larger force"},
+                ],
+                correct_option_id="A",
+                correct_feedback="Correct: third-law force pairs act on different objects.",
+                incorrect_feedback="Third-law pairs are equal and opposite, but they act on different objects.",
+                distractor_feedback={
+                    "B": "Same-object forces are not a third-law action-reaction pair.",
+                    "C": "The forces in a third-law pair have equal magnitude.",
+                },
+            )
+
+        return self._build_question_payload(
+            agent_type="forces",
+            concept_tag="newton_second_law",
+            question=f"What should you do before calculating this force problem? ({problem_context})",
+            options=[
+                {"id": "A", "text": "Draw/list all external forces on the object, then write sum F = ma for the net force"},
+                {"id": "B", "text": "Use the largest single force as ma"},
+                {"id": "C", "text": "Set every force equal to zero whenever the object moves"},
+            ],
+            correct_option_id="A",
+            correct_feedback="Correct: Newton's second law uses the net external force on the chosen object.",
+            incorrect_feedback="Start with the free-body diagram and write the net-force equation, not isolated forces.",
+            distractor_feedback={
+                "B": "Acceleration depends on the net force, not the largest individual force.",
+                "C": "Moving objects do not automatically have zero net force.",
+            },
+        )
+
     def _deterministic_assessment(self, agent_id: str, problem: str) -> Tuple[Optional[str], float, List[str]]:
         lower = problem.lower()
+        if not lower.strip():
+            return None, 0.0, []
 
         if agent_id == "forces_agent":
             checks = [
-                (
-                    "newton_first_law",
-                    [
-                        r"newton'?s?\s*first",
-                        r"\binertia\b",
-                        r"stays?\s+at\s+rest",
-                        r"stays?\s+in\s+motion",
-                        r"constant\s+velocity",
-                    ],
-                    0.80,
-                ),
-                ("newton_second_law", [r"newton'?s?\s*second", r"\bf\s*=\s*m\s*a\b", r"\bnet force\b"], 0.82),
-                (
-                    "newton_third_law",
-                    [
-                        r"newton'?s?\s*third",
-                        r"action[- ]reaction",
-                        r"equal\s+and\s+opposite",
-                    ],
-                    0.80,
-                ),
                 (
                     "hookes_law",
                     [
@@ -439,13 +803,81 @@ class KnowledgeTransferGate:
                     0.84,
                 ),
                 ("incline_components", [r"\bincline\b", r"\binclined\b", r"\bramp\b"], 0.78),
+                (
+                    "newton_third_law",
+                    [
+                        r"newton'?s?\s*third",
+                        r"action[- ]reaction",
+                        r"equal\s+and\s+opposite",
+                    ],
+                    0.80,
+                ),
+                (
+                    "newton_first_law",
+                    [
+                        r"newton'?s?\s*first",
+                        r"\binertia\b",
+                        r"stays?\s+at\s+rest",
+                        r"stays?\s+in\s+motion",
+                        r"constant\s+velocity",
+                    ],
+                    0.80,
+                ),
+                (
+                    "newton_second_law",
+                    [
+                        r"newton'?s?\s*second",
+                        r"\bf\s*=\s*m\s*a\b",
+                        r"\bnet force\b",
+                        r"\bforce\b",
+                        r"\bforces\b",
+                        r"\bpush(?:ed|es|ing)?\b",
+                        r"\bpull(?:ed|s|ing)?\b",
+                        r"\baccelerat(?:e|es|ed|ing|ion)\b",
+                        r"\bfree[- ]?body\b",
+                        r"\bfbd\b",
+                    ],
+                    0.82,
+                ),
             ]
         elif agent_id == "kinematics_agent":
             checks = [
-                ("projectile_components", [r"\bprojectile\b", r"\blaunch\b", r"angle"], 0.83),
                 ("projectile_peak", [r"maximum height", r"\bpeak\b"], 0.82),
                 ("range_formula", [r"\brange\b", r"maximum x distance"], 0.82),
-                ("equation_selection", [r"which (equation|formula)", r"kinematic equation"], 0.80),
+                (
+                    "projectile_components",
+                    [
+                        r"\bprojectile\b",
+                        r"\blaunch(?:ed)?\b",
+                        r"\bthrown?\b",
+                        r"\bthrow(?:n|s|ing)?\b",
+                        r"\bball\b.*(?:\d+(?:\.\d+)?\s*m/s).*(?:\d+(?:\.\d+)?\s*(?:°|degrees?\b|deg\b))",
+                        r"(?:\d+(?:\.\d+)?\s*m/s).*(?:\d+(?:\.\d+)?\s*(?:°|degrees?\b|deg\b))",
+                        r"\bangle\b",
+                    ],
+                    0.83,
+                ),
+                (
+                    "equation_selection",
+                    [
+                        r"which (equation|formula)",
+                        r"kinematic equation",
+                        r"\b1[- ]?d\b",
+                        r"\bone[- ]dimensional\b",
+                        r"\bvelocity\b",
+                        r"\bspeed\b",
+                        r"\baccelerat(?:e|es|ed|ing|ion)\b",
+                        r"\bdisplacement\b",
+                        r"\bdistance\b",
+                        r"\bposition\b",
+                        r"\btime\b",
+                        r"\bfree[- ]?fall\b",
+                        r"\bdrops?\b",
+                        r"\bdropp(?:ed|ing)\b",
+                        r"\bfall(?:s|ing)?\b",
+                    ],
+                    0.80,
+                ),
                 ("sign_convention", [r"sign convention", r"\+y", r"-g"], 0.72),
             ]
         else:
@@ -459,6 +891,10 @@ class KnowledgeTransferGate:
                     break
 
         if not matched:
+            if agent_id == "forces_agent":
+                return "newton_second_law", 0.72, ["forces_agent_default"]
+            if agent_id == "kinematics_agent":
+                return "equation_selection", 0.72, ["kinematics_agent_default"]
             return None, 0.0, []
 
         concept, score, _ = matched[0]

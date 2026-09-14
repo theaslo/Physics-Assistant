@@ -37,7 +37,7 @@ export interface KnowledgeTransferQuestion {
 }
 
 export interface KnowledgeTransferResult {
-  status: 'answer_processed' | 'remediation_required' | 'remediation_followup'
+  status: 'answer_processed' | 'remediation_required' | 'remediation_followup' | 'remediation_complete' | 'full_solution_requested'
   check_id?: string | null
   agent_id?: string
   concept_tag: string
@@ -47,6 +47,9 @@ export interface KnowledgeTransferResult {
   guidance?: string
   step_index?: number
   student_message?: string
+  has_drawing?: boolean
+  sketch_analysis?: Record<string, unknown>
+  submission_check?: Record<string, unknown>
   remediation?: {
     prompt: string
     next_step_prompt: string
