@@ -1187,6 +1187,9 @@ class StrandsPhysicsAgent(ABC):
             if not raw_text:
                 logger.warning("Fast MCP call for %s returned no text: %s", tool_name, tool_result)
                 return None
+            if self._is_mcp_error_text(raw_text):
+                logger.warning("Fast MCP call for %s returned tool error text: %s", tool_name, raw_text[:300])
+                continue
 
             tool_names.append(tool_name)
             raw_outputs.append(raw_text)
@@ -1197,8 +1200,18 @@ class StrandsPhysicsAgent(ABC):
             if index >= 3:
                 break
 
+        if not raw_outputs:
+            return None
+
         combined_tool_text = self._combine_fast_mcp_outputs(tool_names, raw_outputs)
         solution = self._strip_embedded_diagram_json(combined_tool_text).strip()
+        primary_diagram = diagrams[0] if diagrams else self._extract_diagram_from_text(combined_tool_text)
+        if (
+            self.agent_id == "forces_agent"
+            and isinstance(primary_diagram, dict)
+            and primary_diagram.get("type") == "inclined_plane_diagram"
+        ):
+            solution = self._format_incline_summary_from_diagram(primary_diagram)
 
         llm_solution = await self._format_fast_mcp_response_with_llm(
             problem=problem,
@@ -1212,9 +1225,14 @@ class StrandsPhysicsAgent(ABC):
         return {
             "solution": solution,
             "tool_names": tool_names,
-            "diagram": diagrams[0] if diagrams else self._extract_diagram_from_text(combined_tool_text),
+            "diagram": primary_diagram,
             "llm_explanation_used": bool(llm_solution),
         }
+
+    def _is_mcp_error_text(self, text: str) -> bool:
+        """Identify tool-level error payloads returned as plain text."""
+        normalized = text.strip().lower()
+        return normalized.startswith("error:")
 
     async def _build_fast_mcp_plan_with_llm(
         self,
