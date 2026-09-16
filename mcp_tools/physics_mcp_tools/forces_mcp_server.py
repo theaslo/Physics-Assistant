@@ -43,6 +43,15 @@ def serve(host, port, transport):  # noqa: PLR0915
         else:
             logger.warning("Database API not available - running without logging")
 
+    def with_diagram_payload(result_text: str, payload: Dict) -> str:
+        """Append machine-readable diagram payload for downstream UI rendering."""
+        return (
+            f"{result_text}\n\n"
+            "DIAGRAM_JSON_START\n"
+            f"{json.dumps(payload)}\n"
+            "DIAGRAM_JSON_END"
+        )
+
 
 
     @mcp.tool()
@@ -163,7 +172,29 @@ def serve(host, port, transport):  # noqa: PLR0915
             else:
                 result += f"The resultant force is {net_magnitude:.2f} N at {net_angle:.1f}° from the positive x-axis."
 
-            return result.strip()
+            payload = {
+                "type": "force_vector_addition",
+                "title": "Force Vector Addition",
+                "vectors": [
+                    {
+                        "name": f"F{fd['num']}",
+                        "magnitude_n": fd["magnitude"],
+                        "angle_deg": fd["angle"],
+                        "fx_n": fd["fx"],
+                        "fy_n": fd["fy"],
+                    }
+                    for fd in force_details
+                ],
+                "resultant": {
+                    "name": "Resultant",
+                    "magnitude_n": net_magnitude,
+                    "angle_deg": net_angle,
+                    "fx_n": total_fx,
+                    "fy_n": total_fy,
+                },
+            }
+
+            return with_diagram_payload(result.strip(), payload)
 
         except Exception as e:
             return f"Error: {str(e)}\nExpected format: '[{{\"magnitude\": 10, \"angle\": 30}}]'"
@@ -202,7 +233,18 @@ def serve(host, port, transport):  # noqa: PLR0915
     Verification:
     Magnitude = √(Fx² + Fy²) = √({force_x:.2f}² + {force_y:.2f}²) = {magnitude:.2f} N ✓
     """
-            return result
+            payload = {
+                "type": "force_components_diagram",
+                "title": "Force Components",
+                "vector": {
+                    "name": "F",
+                    "magnitude_n": magnitude,
+                    "angle_deg": angle_degrees,
+                    "fx_n": force_x,
+                    "fy_n": force_y,
+                },
+            }
+            return with_diagram_payload(result, payload)
 
         except Exception as e:
             return f"Error in calculation: {str(e)}"
@@ -280,6 +322,7 @@ def serve(host, port, transport):  # noqa: PLR0915
 
             total_fx = 0
             total_fy = 0
+            forces_payload = []
 
             for force in forces:
                 name = force['name']
@@ -289,6 +332,15 @@ def serve(host, port, transport):  # noqa: PLR0915
                 fx, fy = calculate_force_components(magnitude, angle)
                 total_fx += fx
                 total_fy += fy
+                forces_payload.append(
+                    {
+                        "name": name,
+                        "magnitude_n": float(magnitude),
+                        "angle_deg": float(angle),
+                        "fx_n": float(fx),
+                        "fy_n": float(fy),
+                    }
+                )
 
                 # Describe force direction
                 if angle == 0:
@@ -325,7 +377,20 @@ def serve(host, port, transport):  # noqa: PLR0915
                 diagram_text += f"✗ Object is NOT in equilibrium (net force = {net_magnitude:.2f} N)\n"
                 diagram_text += f"  → Object will accelerate in the direction {net_angle:.1f}°"
 
-            return diagram_text
+            payload = {
+                "type": "free_body_diagram",
+                "title": f"Free-Body Diagram: {object_name.title()}",
+                "object_name": object_name.title(),
+                "forces": forces_payload,
+                "net_force": {
+                    "fx_n": float(total_fx),
+                    "fy_n": float(total_fy),
+                    "magnitude_n": float(net_magnitude),
+                    "angle_deg": float(net_angle),
+                },
+            }
+
+            return with_diagram_payload(diagram_text, payload)
 
         except (json.JSONDecodeError, KeyError, ValueError) as e:
             return 'Error: Please provide valid JSON format like [{"name": "Weight", "magnitude": 50, "angle": 270}]'
@@ -346,6 +411,7 @@ def serve(host, port, transport):  # noqa: PLR0915
 
             total_fx = 0
             total_fy = 0
+            forces_payload = []
 
             result = "Equilibrium Analysis:\n====================\n\nForces Applied:\n"
 
@@ -355,6 +421,15 @@ def serve(host, port, transport):  # noqa: PLR0915
                 fx, fy = calculate_force_components(magnitude, angle)
                 total_fx += fx
                 total_fy += fy
+                forces_payload.append(
+                    {
+                        "name": f"F{i}",
+                        "magnitude_n": float(magnitude),
+                        "angle_deg": float(angle),
+                        "fx_n": float(fx),
+                        "fy_n": float(fy),
+                    }
+                )
                 result += f"- Force {i}: {magnitude:.1f} N at {angle:.1f}° → ({fx:.2f}, {fy:.2f}) N\n"
 
             net_magnitude, net_angle = calculate_resultant_force(total_fx, total_fy)
@@ -364,6 +439,7 @@ def serve(host, port, transport):  # noqa: PLR0915
             result += f"ΣFy = {total_fy:.2f} N\n"
             result += f"Net Force = {net_magnitude:.2f} N at {net_angle:.1f}°\n\n"
 
+            balancing_force = None
             if abs(net_magnitude) < 0.01:
                 result += "✓ EQUILIBRIUM ACHIEVED!\n"
                 result += "The forces are perfectly balanced. The object will:\n"
@@ -381,8 +457,30 @@ def serve(host, port, transport):  # noqa: PLR0915
                 result += f"- Direction: {balance_angle:.1f}° (counterclockwise from +x axis)\n"
                 result += f"- Components: Fx = {balance_fx:.2f} N, Fy = {balance_fy:.2f} N\n\n"
                 result += f"This balancing force will exactly cancel the net force and restore equilibrium."
+                balancing_force = {
+                    "name": "Balancing",
+                    "magnitude_n": float(balance_magnitude),
+                    "angle_deg": float(balance_angle),
+                    "fx_n": float(balance_fx),
+                    "fy_n": float(balance_fy),
+                }
 
-            return result
+            payload = {
+                "type": "equilibrium_residual_vector",
+                "title": "Equilibrium Analysis",
+                "forces": forces_payload,
+                "net_force": {
+                    "name": "Net",
+                    "magnitude_n": float(net_magnitude),
+                    "angle_deg": float(net_angle),
+                    "fx_n": float(total_fx),
+                    "fy_n": float(total_fy),
+                },
+                "balancing_force": balancing_force,
+                "is_equilibrium": abs(net_magnitude) < 0.01,
+            }
+
+            return with_diagram_payload(result, payload)
 
         except (json.JSONDecodeError, KeyError, ValueError) as e:
             return 'Error: Please provide valid JSON format like [{"magnitude": 10, "angle": 30}]'
@@ -702,7 +800,22 @@ Newton's Second Law Analysis (F = ma):
     Result: Object will slide down the incline with net force {weight_parallel:.2f} N
     """
 
-            return result
+            payload = {
+                "type": "inclined_plane_diagram",
+                "title": "Inclined Plane Forces",
+                "mass_kg": float(mass),
+                "angle_deg": float(angle_degrees),
+                "coefficient_friction": float(coefficient_friction),
+                "weight_n": float(weight),
+                "weight_parallel_n": float(weight_parallel),
+                "weight_perpendicular_n": float(weight_perpendicular),
+                "normal_n": float(normal_force),
+                "net_down_n": float(weight_parallel - friction_force),
+                "has_friction": coefficient_friction > 0,
+                "friction_n": float(friction_force),
+            }
+
+            return with_diagram_payload(result, payload)
 
         except Exception as e:
             return f"Error in calculation: {str(e)}"
@@ -847,6 +960,7 @@ Newton's Second Law Analysis (F = ma):
             return f"Error: {str(e)}\nPlease check your input format."
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "analyze_tension_forces")
     async def analyze_tension_forces(masses: str, angles: str = "0", gravity: float = 9.81) -> str:
         """Analyze tension forces in rope/string systems.
 
@@ -881,13 +995,23 @@ Newton's Second Law Analysis (F = ma):
     Masses and Angles:
     """
 
-            total_weight = 0
+            total_weight = 0.0
+            weights = []
             for i, (mass, angle) in enumerate(zip(mass_list, angle_list), 1):
                 weight = mass * gravity
                 total_weight += weight
+                weights.append(weight)
                 result += f"- Mass {i}: {mass:.2f} kg, Weight: {weight:.2f} N, Angle: {angle:.1f}°\n"
 
             result += f"\nForce Analysis:\n"
+            payload = {
+                "type": "tension_system_diagram",
+                "title": "Tension System",
+                "gravity": float(gravity),
+                "masses_kg": [float(m) for m in mass_list],
+                "angles_deg": [float(a) for a in angle_list],
+                "weights_n": [float(w) for w in weights],
+            }
 
             if len(mass_list) == 1:
                 # Single hanging mass
@@ -899,6 +1023,12 @@ Newton's Second Law Analysis (F = ma):
                     # Simple vertical hanging
                     result += f"Single mass hanging vertically:\n"
                     result += f"Tension = Weight = {weight:.2f} N\n"
+                    payload.update(
+                        {
+                            "system_type": "single_mass_vertical",
+                            "tension_n": float(weight),
+                        }
+                    )
                 else:
                     # Mass at an angle
                     angle_rad = degrees_to_radians(angle)
@@ -909,6 +1039,14 @@ Newton's Second Law Analysis (F = ma):
                     result += f"Vertical tension component: {weight:.2f} N\n"
                     result += f"Horizontal tension component: {tension_horizontal:.2f} N\n"
                     result += f"Total tension in rope: {tension_vertical:.2f} N\n"
+                    payload.update(
+                        {
+                            "system_type": "single_mass_angled",
+                            "tension_n": float(tension_vertical),
+                            "vertical_component_n": float(weight),
+                            "horizontal_component_n": float(tension_horizontal),
+                        }
+                    )
 
             elif len(mass_list) == 2:
                 # Two masses - could be pulley system
@@ -927,13 +1065,35 @@ Newton's Second Law Analysis (F = ma):
                         result += f"Tension in rope: {tension:.2f} N\n"
                         result += f"System acceleration: {acceleration:.2f} m/s²\n"
                         result += f"Direction: {'Mass 1 down' if w1 > w2 else 'Mass 2 down'}\n"
+                        payload.update(
+                            {
+                                "system_type": "two_mass_atwood",
+                                "tension_n": float(tension),
+                                "acceleration_mps2": float(acceleration),
+                                "direction": "mass_1_down" if w1 > w2 else "mass_2_down",
+                            }
+                        )
                     else:
                         result += f"\nBalanced system:\n"
                         result += f"Tension = Weight = {w1:.2f} N\n"
                         result += f"System acceleration: 0 m/s² (equilibrium)\n"
+                        payload.update(
+                            {
+                                "system_type": "two_mass_balanced",
+                                "tension_n": float(w1),
+                                "acceleration_mps2": 0.0,
+                                "direction": "balanced",
+                            }
+                        )
                 else:
                     result += f"\nFor angled configurations, more complex analysis required.\n"
                     result += f"This involves resolving forces in multiple directions.\n"
+                    payload.update(
+                        {
+                            "system_type": "two_mass_angled",
+                            "note": "angled_two_mass_not_fully_solved",
+                        }
+                    )
 
             else:
                 # Multiple masses - general case
@@ -941,8 +1101,14 @@ Newton's Second Law Analysis (F = ma):
                 result += f"Total system weight: {total_weight:.2f} N\n"
                 result += f"For complex multi-mass systems, detailed equilibrium\n"
                 result += f"analysis of each connection point is required.\n"
+                payload.update(
+                    {
+                        "system_type": "multi_mass",
+                        "total_weight_n": float(total_weight),
+                    }
+                )
 
-            return result
+            return with_diagram_payload(result, payload)
 
         except Exception as e:
             return f"Error in calculation: {str(e)}"

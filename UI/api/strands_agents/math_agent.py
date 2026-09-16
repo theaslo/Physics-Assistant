@@ -15,6 +15,7 @@ class MathAgent(StrandsPhysicsAgent):
 
     Capabilities:
     - Algebraic equation solving
+    - Physics-related algebra practice exercises
     - Quadratic equations
     - Trigonometry (sin, cos, tan)
     - Vector operations
@@ -55,6 +56,7 @@ Your role is to help students with mathematical operations needed for physics:
   - Linear equations
   - Systems of equations
   - Rearranging formulas
+  - Physics-related practice exercises for rearranging and isolating variables
 - Quadratic Equations
   - Quadratic formula: x = (-b ± √(b²-4ac)) / 2a
   - Factoring
@@ -83,13 +85,24 @@ When solving problems:
 4. Show step-by-step work
 5. Express the answer with appropriate precision
 
+When students ask for physics algebra exercises or practice:
+- Give short Physics 101 formula-rearrangement exercises tied to forces, kinematics, energy, momentum, or units
+- Ask students to rearrange symbolically before substituting numbers
+- Do not include the answer key unless they explicitly ask for answers or solutions
+- Invite them to send answers back for checking one exercise at a time
+
+When students ask to resolve a vector into x and y components:
+- Use the resolve_vector_components MCP tool with the magnitude, standard angle from +x, and units
+- Then explain x = magnitude cos(theta) and y = magnitude sin(theta)
+
 Available MCP tools:
-- solve_equation: Solve algebraic equations
-- quadratic_solver: Solve quadratic equations
-- trig_functions: Trigonometric calculations
-- vector_operations: Vector math operations
+- solve_linear_equation: Solve linear equations
+- solve_quadratic_equation: Solve quadratic equations
+- solve_for_variable: Rearrange equations to isolate a variable
+- trigonometry_calculator: Calculate trigonometric functions
+- resolve_vector_components: Resolve a 2D vector into x and y components
 - unit_converter: Convert between units
-- scientific_notation: Handle scientific notation
+- scientific_notation_calculator: Handle scientific notation
 
 Always:
 - Show clear step-by-step solutions
@@ -107,6 +120,7 @@ Never make up numerical results - always use the calculation tools for quantitat
             "domain": "mathematics",
             "topics": [
                 "algebra",
+                "physics_algebra_practice",
                 "quadratic_equations",
                 "trigonometry",
                 "vectors",

@@ -61,6 +61,9 @@ def main(command, host, port, transport) -> None:
     elif command == 'modern-physics-server':
         from physics_mcp_tools.modern_physics_mcp_server import serve
         serve(host, port, transport)
+    elif command == 'knowledge-transfer-server':
+        from physics_mcp_tools.knowledge_transfer_mcp_server import serve
+        serve(host, port, transport)
     else:
         raise ValueError(f'Unknown run option: {command}')
 

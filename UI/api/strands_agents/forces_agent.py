@@ -77,11 +77,14 @@ When solving problems:
 
 Available MCP tools:
 - newton_second_law: Calculate force, mass, or acceleration using F=ma
-- spring_force: Calculate spring force using Hooke's Law
-- friction_force: Calculate static or kinetic friction
-- force_components: Resolve forces into components
-- equilibrium_analysis: Analyze forces in equilibrium
-- inclined_plane: Solve inclined plane problems
+- calculate_spring_force_tool: Calculate spring force using Hooke's Law
+- calculate_friction_force_tool: Calculate static or kinetic friction
+- resolve_force_components: Resolve forces into components
+- check_equilibrium: Analyze forces in equilibrium
+- analyze_forces_on_incline: Solve inclined plane problems
+- analyze_tension_forces: Solve rope/string tension and pulley systems
+- create_free_body_diagram: Generate free-body force breakdowns
+- add_forces_2d: Add multiple 2D force vectors
 
 Always:
 - Use SI units (N, kg, m/s²)

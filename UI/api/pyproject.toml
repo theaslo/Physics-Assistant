@@ -6,10 +6,10 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     # LangChain for Physics 101 agents
-    "langchain-mcp-adapters>=0.1.7",
-    "langchain-ollama>=0.3.3",
-    "langchain[anthropic,ollama,openai]>=0.3.25",
-    "langgraph>=0.4.8",
+    "langchain-mcp-adapters>=0.1.9",
+    "langchain-ollama>=0.3.6",
+    "langchain[anthropic,ollama,openai]>=0.3.26",
+    "langgraph>=0.5.4",
     # Strands SDK for Physics 102-201-202 agents
     "strands-agents>=0.1.0",
     "mcp>=1.13.0,<2.0.0",

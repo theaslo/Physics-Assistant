@@ -35,6 +35,15 @@ def serve(host, port, transport):
 # Initialize FastMCP server
     mcp = FastMCP("angular_motion")
 
+    def with_diagram_payload(result_text: str, payload: Dict) -> str:
+        """Append machine-readable diagram payload for downstream UI rendering."""
+        return (
+            f"{result_text}\n\n"
+            "DIAGRAM_JSON_START\n"
+            f"{json.dumps(payload)}\n"
+            "DIAGRAM_JSON_END"
+        )
+
 
     @mcp.tool()
     async def angular_kinematics(kinematics_data: str) -> str:
@@ -90,6 +99,7 @@ def serve(host, port, transport):
             alpha = data.get("alpha")
             time = data.get("time")
             theta = data.get("theta")
+            time_window = None
             
             # Solve based on given information
             if omega_0 is not None and alpha is not None and time is not None:
@@ -105,6 +115,7 @@ def serve(host, port, transport):
     Angular acceleration: α = {alpha:.3f} rad/s²
 
     """
+                time_window = max(0.0, float(time))
                 
             elif omega_0 is not None and omega_f is not None and alpha is not None:
                 # Calculate time and displacement using equation 2
@@ -118,6 +129,7 @@ def serve(host, port, transport):
     Final position: θf = θ₀ + Δθ = {theta_0} + {theta_change:.3f} = {theta_f:.3f} rad
 
     """
+                time_window = max(0.0, float(time_calc))
                 
             elif omega_0 is not None and alpha is not None and theta is not None:
                 # Calculate final velocity using equation 3
@@ -131,6 +143,7 @@ def serve(host, port, transport):
     Time taken: t = (ωf - ω₀)/α = {time_calc:.3f} s
 
     """
+                time_window = max(0.0, float(time_calc))
             
             # Convert to degrees and other units
             if 'omega_f_calc' in locals():
@@ -165,7 +178,32 @@ def serve(host, port, transport):
     - Frequency: f = ω/(2π) = 1/T (revolutions per second)
     """
             
-            return result
+            # Build a rotation graphs payload for UI if we have enough signal.
+            try:
+                alpha_plot = float(alpha) if alpha is not None else 0.0
+                omega0_plot = float(omega_0) if omega_0 is not None else 0.0
+                theta0_plot = float(theta_0) if theta_0 is not None else 0.0
+                t_end = float(time_window) if time_window is not None else (max(0.0, float(time)) if time is not None else 5.0)
+                if t_end <= 0:
+                    t_end = 5.0
+
+                n = 30
+                times = [i * t_end / (n - 1) for i in range(n)]
+                theta_series = [theta0_plot + omega0_plot * t + 0.5 * alpha_plot * t * t for t in times]
+                omega_series = [omega0_plot + alpha_plot * t for t in times]
+                alpha_series = [alpha_plot for _ in times]
+
+                payload = {
+                    "type": "rotation_graphs_plot",
+                    "title": "Angular Kinematics Graphs",
+                    "times_s": times,
+                    "theta_series_rad": theta_series,
+                    "omega_series_rad_s": omega_series,
+                    "alpha_series_rad_s2": alpha_series,
+                }
+                return with_diagram_payload(result, payload)
+            except Exception:
+                return result
             
         except Exception as e:
             return f"Error in angular kinematics analysis: {str(e)}"
@@ -490,6 +528,25 @@ def serve(host, port, transport):
     Using θ = ½αt²: t = √(2θ/α) = √(2×2π/{alpha_result:.3f}) = {math.sqrt(4*math.pi/abs(alpha_result)) if alpha_result != 0 else 'undefined':.2f} s
     """
             
+            # Diagram payload for torque lever visualization (best for force-radius cases).
+            if "force" in data and "radius" in data:
+                force = float(data["force"])
+                radius = float(data["radius"])
+                angle = float(data.get("angle", 90))
+                angle_rad = degrees_to_radians(angle)
+                f_perp = force * math.sin(angle_rad)
+                payload = {
+                    "type": "torque_lever_diagram",
+                    "title": "Torque Lever Diagram",
+                    "force_n": force,
+                    "radius_m": radius,
+                    "angle_deg": angle,
+                    "force_perpendicular_n": f_perp,
+                    "torque_nm": total_torque,
+                    "direction": "counterclockwise" if total_torque >= 0 else "clockwise",
+                }
+                return with_diagram_payload(result, payload)
+
             return result
             
         except Exception as e:
@@ -1285,6 +1342,23 @@ def serve(host, port, transport):
     - Rotational: {(KE_rot_final/KE_total_final)*100:.1f}%
 
     """
+
+                payload = {
+                    "type": "rolling_energy_split",
+                    "title": f"Rolling Energy Split: {obj_type.title()}",
+                    "object_type": obj_type.lower(),
+                    "mass_kg": mass,
+                    "radius_m": radius,
+                    "velocity_mps": v_final_rolling,
+                    "omega_rad_s": omega_final,
+                    "translational_ke_j": KE_trans_final,
+                    "rotational_ke_j": KE_rot_final,
+                    "total_ke_j": KE_total_final,
+                    "incline_angle_deg": angle,
+                    "acceleration_mps2": a_rolling,
+                    "time_s": time_rolling,
+                }
+                return with_diagram_payload(result, payload)
             
             # Sphere race comparison
             elif "sphere_race" in data:
@@ -1568,7 +1642,20 @@ Applications:
 - Centrifuge (apparent outward force)
 - Banked curves (component of normal force)
 """
-            return result
+            payload: Dict[str, float | str | None] = {
+                "type": "circular_motion_vectors",
+                "title": "Circular Motion Vectors",
+                "radius_m": r,
+                "speed_mps": v,
+                "omega_rad_s": omega,
+                "period_s": T,
+                "frequency_hz": f,
+                "centripetal_acc_mps2": a_c,
+            }
+            if m is not None:
+                payload["mass_kg"] = m
+                payload["centripetal_force_n"] = m * a_c
+            return with_diagram_payload(result, payload)
 
         except Exception as e:
             return f"Error in circular motion analysis: {str(e)}"
@@ -1674,7 +1761,55 @@ Applications:
 - Molecular vibrations
 - Electrical LC circuits
 """
-            return result
+            # Build animation payloads for spring SHM or pendulum SHM.
+            frames_count = 40
+            t_end = max(2 * T, T)
+            times = [i * t_end / (frames_count - 1) for i in range(frames_count)]
+
+            if shm_type == "pendulum" or "length" in data:
+                L = float(data.get("length", data.get("L", 1)))
+                # Interpret amplitude as arc-length amplitude for pendulum animation.
+                theta_amp_rad = (A / L) if L > 0 else 0.0
+                frames = []
+                for tt in times:
+                    theta_rad = theta_amp_rad * math.cos(omega * tt + phi)
+                    x = L * math.sin(theta_rad)
+                    y = -L * math.cos(theta_rad)
+                    frames.append(
+                        {
+                            "t_s": tt,
+                            "theta_deg": radians_to_degrees(theta_rad),
+                            "x_m": x,
+                            "y_m": y,
+                        }
+                    )
+                payload = {
+                    "type": "pendulum_animation",
+                    "title": "Pendulum Motion",
+                    "length_m": L,
+                    "period_s": T,
+                    "frequency_hz": f,
+                    "theta_max_deg": radians_to_degrees(theta_amp_rad),
+                    "frames": frames,
+                }
+                return with_diagram_payload(result, payload)
+
+            frames = []
+            for tt in times:
+                x = A * math.cos(omega * tt + phi)
+                v = -A * omega * math.sin(omega * tt + phi)
+                a = -A * omega**2 * math.cos(omega * tt + phi)
+                frames.append({"t_s": tt, "x_m": x, "v_mps": v, "a_mps2": a})
+            payload = {
+                "type": "shm_spring_animation",
+                "title": "Spring SHM",
+                "amplitude_m": A,
+                "omega_rad_s": omega,
+                "period_s": T,
+                "frequency_hz": f,
+                "frames": frames,
+            }
+            return with_diagram_payload(result, payload)
 
         except Exception as e:
             return f"Error in SHM analysis: {str(e)}"

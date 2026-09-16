@@ -218,7 +218,8 @@ class LearningAnalyticsEngine:
                     topic = progress['topic']
                     if progress['problems_attempted'] > 0:
                         success_rate = progress['problems_solved'] / progress['problems_attempted']
-                        profile.concept_mastery[topic] = min(success_rate, progress['proficiency_score'] / 100.0)
+                        proficiency_score = float(progress['proficiency_score'] or 0.0)
+                        profile.concept_mastery[topic] = min(success_rate, proficiency_score / 100.0)
                 
                 # Get recent interactions for pattern analysis
                 interactions = await conn.fetch("""

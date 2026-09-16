@@ -34,6 +34,15 @@ def serve(host, port, transport):
     
     mcp = FastMCP(NAME, stateless_http=False)
 
+    def with_diagram_payload(result_text: str, payload: dict) -> str:
+        """Append machine-readable diagram payload for downstream UI rendering."""
+        return (
+            f"{result_text}\n\n"
+            "DIAGRAM_JSON_START\n"
+            f"{json.dumps(payload)}\n"
+            "DIAGRAM_JSON_END"
+        )
+
 
     @mcp.tool()
     async def solve_quadratic_equation(equation: str) -> str:
@@ -338,6 +347,60 @@ def serve(host, port, transport):
             
         except Exception as e:
             return f"Error in trigonometric calculation: {str(e)}"
+
+    @mcp.tool()
+    async def resolve_vector_components(magnitude: float, angle_degrees: float, units: str = "N") -> str:
+        """
+        Resolve a 2D vector into x and y components.
+
+        Args:
+            magnitude: Vector magnitude
+            angle_degrees: Standard angle in degrees, counterclockwise from the +x axis
+            units: Units for the vector components, such as N or m/s
+
+        Returns:
+            str: Step-by-step component calculation and diagram payload
+        """
+        try:
+            angle_rad = degrees_to_radians(angle_degrees)
+            component_x = magnitude * math.cos(angle_rad)
+            component_y = magnitude * math.sin(angle_rad)
+            unit_label = units.strip() if isinstance(units, str) and units.strip() else "units"
+
+            result = f"""
+    Vector Component Resolution:
+    ===========================
+
+    Given Vector:
+    - Magnitude: {magnitude:.2f} {unit_label}
+    - Angle: {angle_degrees:.1f}° (counterclockwise from the +x axis)
+
+    Component Calculations:
+    x-component = magnitude × cos(θ) = {magnitude:.2f} × cos({angle_degrees:.1f}°) = {component_x:.2f} {unit_label}
+    y-component = magnitude × sin(θ) = {magnitude:.2f} × sin({angle_degrees:.1f}°) = {component_y:.2f} {unit_label}
+
+    Results:
+    - x-component: {component_x:.2f} {unit_label}
+    - y-component: {component_y:.2f} {unit_label}
+
+    Verification:
+    Magnitude = √(x² + y²) = √({component_x:.2f}² + {component_y:.2f}²) = {magnitude:.2f} {unit_label}
+    """
+            payload = {
+                "type": "force_components_diagram",
+                "title": "Vector Components",
+                "vector": {
+                    "name": "Vector",
+                    "magnitude_n": float(magnitude),
+                    "angle_deg": float(angle_degrees),
+                    "fx_n": float(component_x),
+                    "fy_n": float(component_y),
+                },
+            }
+            return with_diagram_payload(result, payload)
+
+        except Exception as e:
+            return f"Error in vector component calculation: {str(e)}"
 
     @mcp.tool()
     async def triangle_solver(triangle_data: str) -> str:
@@ -1233,6 +1296,80 @@ To solve {equation} for {target_var}:
             return f"Error solving equation: {str(e)}"
 
     @mcp.tool()
+    async def unit_converter(value: float, from_unit: str, to_unit: str) -> str:
+        """
+        Convert common Physics 101 units.
+
+        Args:
+            value: Numerical value to convert
+            from_unit: Original unit, for example "km/h", "m/s", "cm", "min"
+            to_unit: Target unit, for example "m/s", "km/h", "m", "s"
+
+        Returns:
+            str: Unit conversion with the conversion factor shown
+        """
+        try:
+            normalized_from = from_unit.strip().lower().replace(" ", "")
+            normalized_to = to_unit.strip().lower().replace(" ", "")
+            aliases = {
+                "meters": "m",
+                "meter": "m",
+                "kilometers": "km",
+                "kilometer": "km",
+                "centimeters": "cm",
+                "centimeter": "cm",
+                "seconds": "s",
+                "second": "s",
+                "minutes": "min",
+                "minute": "min",
+                "hours": "h",
+                "hour": "h",
+                "km/hr": "km/h",
+                "kph": "km/h",
+                "mps": "m/s",
+            }
+            normalized_from = aliases.get(normalized_from, normalized_from)
+            normalized_to = aliases.get(normalized_to, normalized_to)
+
+            to_base = {
+                "m": ("length", 1.0),
+                "km": ("length", 1000.0),
+                "cm": ("length", 0.01),
+                "mm": ("length", 0.001),
+                "s": ("time", 1.0),
+                "min": ("time", 60.0),
+                "h": ("time", 3600.0),
+                "m/s": ("speed", 1.0),
+                "km/h": ("speed", 1000.0 / 3600.0),
+            }
+            if normalized_from not in to_base or normalized_to not in to_base:
+                supported = ", ".join(sorted(to_base))
+                return f"Error: unsupported conversion. Supported units: {supported}"
+
+            from_dimension, from_factor = to_base[normalized_from]
+            to_dimension, to_factor = to_base[normalized_to]
+            if from_dimension != to_dimension:
+                return f"Error: cannot convert {from_unit} to {to_unit}; dimensions do not match."
+
+            converted = float(value) * from_factor / to_factor
+            result = f"""
+    Unit Conversion:
+    ===============
+
+    Given: {float(value):.6g} {from_unit}
+    Conversion factor: 1 {normalized_from} = {from_factor / to_factor:.6g} {normalized_to}
+
+    Calculation:
+    {float(value):.6g} {normalized_from} x {from_factor / to_factor:.6g} = {converted:.6g} {normalized_to}
+
+    Result: {converted:.6g} {normalized_to}
+    """
+            return result
+
+        except Exception as e:
+            return f"Error in unit conversion: {str(e)}"
+
+    @mcp.tool()
     async def physics_formula_solver(formula_name: str, known_values: str, solve_for: str) -> str:
         """
         Solve common physics formulas with known values.
@@ -1324,9 +1461,70 @@ To solve {equation} for {target_var}:
                         result += f"m = F/a = {F}/{a} = {m:.3f} kg"
                     else:
                         result += "Error: Need both F (force) and a (acceleration)"
+            elif formula_name in {"uniform_motion", "distance", "constant_velocity"}:
+                result += "Formula: d = vt\n\n"
+
+                speed = known.get("v", known.get("speed", known.get("velocity", None)))
+                time_value = known.get("t", known.get("time", None))
+                distance = known.get("d", known.get("distance", known.get("displacement", None)))
+                speed_unit = str(known.get("speed_unit", known.get("velocity_unit", "m/s"))).strip().lower()
+                time_unit = str(known.get("time_unit", "s")).strip().lower()
+
+                def speed_to_mps(raw_speed, raw_unit):
+                    unit = raw_unit.replace(" ", "").replace("km/hr", "km/h").replace("kph", "km/h")
+                    if unit in {"m/s", "mps"}:
+                        return float(raw_speed), "m/s"
+                    if unit == "km/h":
+                        return float(raw_speed) * 1000.0 / 3600.0, "km/h"
+                    return float(raw_speed), raw_unit
+
+                def time_to_seconds(raw_time, raw_unit):
+                    unit = raw_unit.replace(" ", "")
+                    if unit in {"s", "sec", "second", "seconds"}:
+                        return float(raw_time), "s"
+                    if unit in {"min", "minute", "minutes"}:
+                        return float(raw_time) * 60.0, "min"
+                    if unit in {"h", "hr", "hour", "hours"}:
+                        return float(raw_time) * 3600.0, "h"
+                    return float(raw_time), raw_unit
+
+                if solve_for in {"d", "distance", "displacement", "x"}:
+                    if speed is not None and time_value is not None:
+                        speed_mps, original_speed_unit = speed_to_mps(speed, speed_unit)
+                        time_s, original_time_unit = time_to_seconds(time_value, time_unit)
+                        distance = speed_mps * time_s
+                        result += "Solving for distance:\n"
+                        if original_speed_unit != "m/s":
+                            result += f"v = {speed} {original_speed_unit} = {speed_mps:.3f} m/s\n"
+                        if original_time_unit != "s":
+                            result += f"t = {time_value} {original_time_unit} = {time_s:.3f} s\n"
+                        result += f"d = vt = ({speed_mps:.3f} m/s)({time_s:.3f} s) = {distance:.3f} m\n"
+                        result += f"\nAnswer: d = {distance:.3f} m"
+                    else:
+                        result += "Error: Need speed/velocity and time to solve for distance"
+                elif solve_for in {"v", "speed", "velocity"}:
+                    if distance is not None and time_value is not None:
+                        time_s, original_time_unit = time_to_seconds(time_value, time_unit)
+                        speed_mps = float(distance) / time_s
+                        if original_time_unit != "s":
+                            result += f"t = {time_value} {original_time_unit} = {time_s:.3f} s\n"
+                        result += f"v = d/t = {float(distance):.3f} m / {time_s:.3f} s = {speed_mps:.3f} m/s\n"
+                        result += f"\nAnswer: v = {speed_mps:.3f} m/s"
+                    else:
+                        result += "Error: Need distance and time to solve for speed"
+                elif solve_for in {"t", "time"}:
+                    if distance is not None and speed is not None:
+                        speed_mps, original_speed_unit = speed_to_mps(speed, speed_unit)
+                        time_s = float(distance) / speed_mps
+                        if original_speed_unit != "m/s":
+                            result += f"v = {speed} {original_speed_unit} = {speed_mps:.3f} m/s\n"
+                        result += f"t = d/v = {float(distance):.3f} m / {speed_mps:.3f} m/s = {time_s:.3f} s\n"
+                        result += f"\nAnswer: t = {time_s:.3f} s"
+                    else:
+                        result += "Error: Need distance and speed to solve for time"
             else:
                 result += f"Formula '{formula_name}' not implemented yet.\n"
-                result += f"Available formulas: kinetic_energy, force"
+                result += f"Available formulas: kinetic_energy, force, uniform_motion"
             
             return result
             

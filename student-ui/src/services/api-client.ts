@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from 'axios'
+import type { DiagramPayload } from '../stores/chat-store'
 
 // Types
 export interface AgentInfo {
@@ -19,6 +20,43 @@ export interface SolveRequest {
   session_id?: string
 }
 
+export interface KnowledgeTransferQuestion {
+  status: 'question_required'
+  check_id: string
+  agent_id: string
+  concept_tag: string
+  question_id?: string | null
+  question: string
+  options: Array<{
+    id: string
+    text: string
+  }>
+  confidence: number
+  threshold: number
+  reason_tags?: string[]
+}
+
+export interface KnowledgeTransferResult {
+  status: 'answer_processed' | 'remediation_required' | 'remediation_followup' | 'remediation_complete' | 'full_solution_requested'
+  check_id?: string | null
+  agent_id?: string
+  concept_tag: string
+  was_correct?: boolean
+  confidence?: number
+  threshold?: number
+  guidance?: string
+  step_index?: number
+  student_message?: string
+  has_drawing?: boolean
+  sketch_analysis?: Record<string, unknown>
+  submission_check?: Record<string, unknown>
+  remediation?: {
+    prompt: string
+    next_step_prompt: string
+    can_continue?: boolean
+  }
+}
+
 export interface SolveResponse {
   success: boolean
   agent_id: string
@@ -27,6 +65,8 @@ export interface SolveResponse {
   reasoning?: string
   tools_used?: string[]
   execution_time_ms?: number
+  diagram?: DiagramPayload
+  hitl?: KnowledgeTransferQuestion | KnowledgeTransferResult
   metadata?: Record<string, unknown>
   error?: string
 }
@@ -43,7 +83,7 @@ class PhysicsAPIClient {
   constructor() {
     this.api = axios.create({
       baseURL: '/api',
-      timeout: 60000, // 60 second timeout for agent responses
+      timeout: 300000, // 5 minute timeout for agent responses
       headers: {
         'Content-Type': 'application/json',
       },
@@ -67,7 +107,9 @@ class PhysicsAPIClient {
 
   // List available agents
   async listAgents(): Promise<AgentListResponse> {
-    const response = await this.api.get<AgentListResponse>('/agents/list')
+    const response = await this.api.get<AgentListResponse>('/agents/list', {
+      timeout: 8000,
+    })
     return response.data
   }
 
@@ -85,11 +127,13 @@ class PhysicsAPIClient {
   async sendMessage(
     agentId: string,
     message: string,
-    userId: string = 'react_user'
+    userId: string = 'react_user',
+    context?: Record<string, unknown>
   ): Promise<SolveResponse> {
     const response = await this.api.post<SolveResponse>(`/agent/${agentId}/solve`, {
       problem: message,
       user_id: userId,
+      context,
     })
     return response.data
   }

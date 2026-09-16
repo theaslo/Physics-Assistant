@@ -33,6 +33,15 @@ def serve(host, port, transport):
     
     mcp = FastMCP(NAME, stateless_http=False)
 
+    def with_diagram_payload(result_text: str, payload: Dict) -> str:
+        """Append machine-readable diagram payload for downstream UI rendering."""
+        return (
+            f"{result_text}\n\n"
+            "DIAGRAM_JSON_START\n"
+            f"{json.dumps(payload)}\n"
+            "DIAGRAM_JSON_END"
+        )
+
 
     @mcp.tool()
     async def calculate_momentum_1d(mass: float, velocity: float) -> str:
@@ -184,10 +193,11 @@ def serve(host, port, transport):
 
     """
             
+            impulse_value = impulse if "impulse" in locals() else (momentum_change if "momentum_change" in locals() else 0.0)
             result += f"""Physical Interpretation:
     - Impulse represents the change in momentum
     - Units: N⋅s (Newton-seconds) = kg⋅m/s
-    - Direction: {'Positive' if (impulse if 'impulse' in locals() else momentum_change) >= 0 else 'Negative'}
+    - Direction: {'Positive' if impulse_value >= 0 else 'Negative'}
     - Impulse-Momentum Theorem: J = Δp
 
     Key Concepts:
@@ -196,7 +206,20 @@ def serve(host, port, transport):
     - Impulse equals the area under the Force vs Time graph
     """
             
-            return result
+            payload = {
+                "type": "impulse_area_plot",
+                "title": "Impulse as Area Under Force-Time Curve",
+                "force_n": force,
+                "time_s": time,
+                "impulse_ns": impulse_value,
+                "initial_momentum": initial_momentum,
+                "final_momentum": final_momentum,
+                "area_points": [
+                    {"t_s": 0.0, "force_n": force},
+                    {"t_s": time, "force_n": force},
+                ],
+            }
+            return with_diagram_payload(result, payload)
             
         except Exception as e:
             return f"Error in 1D impulse calculation: {str(e)}"
@@ -412,6 +435,8 @@ def serve(host, port, transport):
             v1i = data["v1i"]
             v2i = data["v2i"]
             collision_type = data.get("collision_type", "unknown")
+            v1f: Optional[float] = None
+            v2f: Optional[float] = None
             
             # Calculate initial momenta
             p1i = m1 * v1i
@@ -551,7 +576,28 @@ def serve(host, port, transport):
     - Rocket propulsion (explosion in reverse)
     """
             
-            return result
+            p1f = m1 * v1f if v1f is not None else 0.0
+            p2f = m2 * v2f if v2f is not None else 0.0
+            pf_total = p1f + p2f
+            payload = {
+                "type": "momentum_before_after_vectors",
+                "title": "Momentum Before vs After Collision (1D)",
+                "collision_type": collision_type,
+                "before": [
+                    {"name": "Object 1", "mass_kg": m1, "velocity_mps": v1i, "momentum_kg_mps": p1i},
+                    {"name": "Object 2", "mass_kg": m2, "velocity_mps": v2i, "momentum_kg_mps": p2i},
+                ],
+                "after": [
+                    {"name": "Object 1", "mass_kg": m1, "velocity_mps": v1f, "momentum_kg_mps": p1f},
+                    {"name": "Object 2", "mass_kg": m2, "velocity_mps": v2f, "momentum_kg_mps": p2f},
+                ],
+                "totals": {
+                    "initial_kg_mps": pi_total,
+                    "final_kg_mps": pf_total,
+                    "difference_kg_mps": pi_total - pf_total,
+                },
+            }
+            return with_diagram_payload(result, payload)
             
         except Exception as e:
             return f"Error in 1D momentum conservation analysis: {str(e)}"
@@ -601,6 +647,10 @@ def serve(host, port, transport):
             pi_magnitude = math.sqrt(pxi_total**2 + pyi_total**2)
             pi_angle = radians_to_degrees(math.atan2(pyi_total, pxi_total))
             
+            m_total = m1 + m2
+            vcom_x = pxi_total / m_total if m_total > 0 else 0.0
+            vcom_y = pyi_total / m_total if m_total > 0 else 0.0
+
             result = f"""
     2D Momentum Conservation Analysis:
     =================================
@@ -735,7 +785,31 @@ def serve(host, port, transport):
     - Molecular collision dynamics
     """
             
-            return result
+            trace_points = []
+            for t in [0.0, 0.5, 1.0, 1.5, 2.0]:
+                trace_points.append(
+                    {
+                        "t_s": t,
+                        "x_m": vcom_x * t,
+                        "y_m": vcom_y * t,
+                    }
+                )
+
+            payload = {
+                "type": "center_of_mass_trace",
+                "title": "Center of Mass Trajectory",
+                "total_mass_kg": m_total,
+                "vcom_x_mps": vcom_x,
+                "vcom_y_mps": vcom_y,
+                "initial_total_momentum": {
+                    "px_kg_mps": pxi_total,
+                    "py_kg_mps": pyi_total,
+                    "magnitude_kg_mps": pi_magnitude,
+                    "angle_deg": pi_angle,
+                },
+                "trace_points": trace_points,
+            }
+            return with_diagram_payload(result, payload)
             
         except Exception as e:
             return f"Error in 2D momentum conservation analysis: {str(e)}"
@@ -772,6 +846,7 @@ def serve(host, port, transport):
 
     """
             
+            storyboard_payload: Optional[Dict] = None
             if "car1" in data and "car2" in data:
                 car1 = data["car1"]
                 car2 = data["car2"]
@@ -813,6 +888,32 @@ def serve(host, port, transport):
     Energy dissipated: {ke_total - 0.5*(m1+m2)*(p_total/(m1+m2))**2:.0f} J
 
     """
+                v_final = p_total / (m1 + m2)
+                final_direction = radians_to_degrees(math.atan2(py_total, px_total))
+                storyboard_payload = {
+                    "type": "collision_storyboard",
+                    "title": f"Collision Storyboard: {scenario.replace('_', ' ').title()}",
+                    "collision_type": "perfectly_inelastic_assumed",
+                    "objects": [
+                        {"name": "Vehicle 1", "mass_kg": m1, "speed_mps": v1, "direction_deg": dir1},
+                        {"name": "Vehicle 2", "mass_kg": m2, "speed_mps": v2, "direction_deg": dir2},
+                    ],
+                    "stages": [
+                        {"label": "Before", "time_s": 0.0},
+                        {"label": "Impact", "time_s": 0.1},
+                        {"label": "After", "time_s": 0.2},
+                    ],
+                    "combined_after": {
+                        "mass_kg": m1 + m2,
+                        "speed_mps": v_final,
+                        "direction_deg": final_direction,
+                    },
+                    "energy": {
+                        "initial_ke_j": ke_total,
+                        "final_ke_j": 0.5 * (m1 + m2) * (v_final**2),
+                        "dissipated_j": ke_total - 0.5 * (m1 + m2) * (v_final**2),
+                    },
+                }
                 
                 if analysis_type == "safety":
                     # Calculate forces assuming crash duration
@@ -879,6 +980,8 @@ def serve(host, port, transport):
     - Distribute forces (seat belts, helmets)
     """
             
+            if storyboard_payload:
+                return with_diagram_payload(result, storyboard_payload)
             return result
             
         except Exception as e:

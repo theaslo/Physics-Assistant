@@ -86,11 +86,14 @@ When solving problems:
 
 Available MCP tools:
 - angular_kinematics: Solve rotational kinematics problems
-- linear_angular_conversion: Convert between linear and angular quantities
-- torque_calculator: Calculate torque
-- moment_of_inertia: Calculate moment of inertia
-- angular_momentum: Calculate angular momentum
+- calculate_torque: Calculate torque
+- calculate_moment_of_inertia: Calculate moment of inertia
+- angular_momentum_conservation: Analyze angular momentum conservation
 - rotational_energy: Calculate rotational kinetic energy
+- angular_impulse_momentum: Analyze angular impulse-momentum theorem
+- rolling_motion_analysis: Analyze rolling motion systems
+- circular_motion: Analyze uniform circular motion
+- simple_harmonic_motion: Analyze spring/pendulum SHM
 
 Key Relationships:
 | Linear | Angular |

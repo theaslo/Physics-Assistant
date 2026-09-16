@@ -23,6 +23,15 @@ def serve(host, port, transport):
     logger.info('Starting Waves MCP Server')
     mcp = FastMCP(NAME, stateless_http=False)
 
+    def with_diagram_payload(result_text: str, payload: dict) -> str:
+        """Append machine-readable payload for frontend wave diagrams."""
+        return (
+            f"{result_text}\n\n"
+            "DIAGRAM_JSON_START\n"
+            f"{json.dumps(payload)}\n"
+            "DIAGRAM_JSON_END"
+        )
+
     @mcp.tool()
     async def wave_equation(wave_data: str) -> str:
         """
@@ -90,6 +99,32 @@ Additional Wave Properties:
             if wavelength is not None:
                 k = 2 * math.pi / wavelength
                 result += f"- Wave Number (k = 2π/λ): {k:.4f} rad/m\n"
+
+            if v is not None and f is not None and wavelength is not None:
+                amplitude = float(data.get("amplitude", data.get("A", 0.1)))
+                frames_count = 24
+                samples_count = 64
+                duration_s = max(0.2, 1.0 / max(0.1, f))
+                x_max = max(wavelength * 2.0, 2.0)
+                frames = []
+                for i in range(frames_count):
+                    t_s = i * duration_s / (frames_count - 1)
+                    samples = []
+                    for j in range(samples_count):
+                        x_m = j * x_max / (samples_count - 1)
+                        y_m = amplitude * math.sin(2 * math.pi * (x_m / wavelength - f * t_s))
+                        samples.append({"x_m": x_m, "y_m": y_m})
+                    frames.append({"t_s": t_s, "samples": samples})
+                payload = {
+                    "type": "traveling_wave_animation",
+                    "title": "Traveling Wave Animation",
+                    "velocity_mps": v,
+                    "frequency_hz": f,
+                    "wavelength_m": wavelength,
+                    "amplitude_m": amplitude,
+                    "frames": frames,
+                }
+                return with_diagram_payload(result, payload)
 
             return result
 
@@ -162,7 +197,51 @@ Applications:
 - Astronomical redshift
 - Weather radar
 """
-            return result
+            frames_count = 22
+            duration_s = 2.0
+            source_x0 = -3.5
+            observer_x0 = 3.5
+            source_dir = 1.0 if approaching else -1.0
+            observer_dir = -1.0 if approaching else 1.0
+            source_speed_sim = source_dir * abs(v_source) * 0.02
+            observer_speed_sim = observer_dir * abs(v_observer) * 0.02
+            emit_period_s = max(0.08, 1.0 / max(1.0, f_source))
+            wave_speed_sim = max(0.2, v_medium * 0.02)
+
+            frames = []
+            for i in range(frames_count):
+                t_s = i * duration_s / (frames_count - 1)
+                source_x = source_x0 + source_speed_sim * t_s
+                observer_x = observer_x0 + observer_speed_sim * t_s
+                fronts = []
+                emit_t = 0.0
+                while emit_t <= t_s + 1e-9:
+                    sx_emit = source_x0 + source_speed_sim * emit_t
+                    radius = (t_s - emit_t) * wave_speed_sim
+                    fronts.append({"x_m": sx_emit, "radius_m": radius})
+                    emit_t += emit_period_s
+                frames.append(
+                    {
+                        "t_s": t_s,
+                        "source_x_m": source_x,
+                        "observer_x_m": observer_x,
+                        "fronts": fronts[-18:],
+                    }
+                )
+
+            payload = {
+                "type": "doppler_wavefront_animation",
+                "title": "Doppler Wavefront Animation",
+                "source_frequency_hz": f_source,
+                "source_velocity_mps": v_source,
+                "observer_velocity_mps": v_observer,
+                "medium_velocity_mps": v_medium,
+                "approaching": bool(approaching),
+                "observed_frequency_hz": f_observed,
+                "frequency_shift_hz": freq_shift,
+                "frames": frames,
+            }
+            return with_diagram_payload(result, payload)
 
         except Exception as e:
             return f"Error in Doppler effect calculation: {str(e)}"
@@ -257,7 +336,7 @@ Note: Every 10 dB increase = 10× intensity = ~2× perceived loudness
             str: Complete standing wave analysis with harmonics
         """
         try:
-            data = json.loads(standing_wave_data) if isinstance(standing_wave_data, str) else standing_data
+            data = json.loads(standing_wave_data) if isinstance(standing_wave_data, str) else standing_wave_data
 
             wave_type = data.get("type", "string").lower()
             L = float(data.get("length", data.get("L", 1)))
@@ -311,7 +390,45 @@ Applications:
 - Acoustic resonators
 - Room acoustics
 """
-            return result
+            sample_count = 80
+            harmonics = []
+            mode_shapes = []
+            if wave_type in {"string", "pipe_open"}:
+                harmonic_ns = [1, 2, 3, 4, 5]
+                for n in harmonic_ns:
+                    fn = n * fundamental
+                    lam = 2 * L / n
+                    harmonics.append({"n": n, "frequency_hz": fn, "wavelength_m": lam})
+                    samples = []
+                    for i in range(sample_count):
+                        x_m = i * L / (sample_count - 1)
+                        y = math.sin(n * math.pi * x_m / L)
+                        samples.append({"x_m": x_m, "y_norm": y})
+                    mode_shapes.append({"n": n, "samples": samples})
+            else:
+                harmonic_ns = [1, 3, 5, 7, 9]
+                for n in harmonic_ns:
+                    fn = n * fundamental
+                    lam = 4 * L / n
+                    harmonics.append({"n": n, "frequency_hz": fn, "wavelength_m": lam})
+                    samples = []
+                    for i in range(sample_count):
+                        x_m = i * L / (sample_count - 1)
+                        y = math.sin(n * math.pi * x_m / (2 * L))
+                        samples.append({"x_m": x_m, "y_norm": y})
+                    mode_shapes.append({"n": n, "samples": samples})
+
+            payload = {
+                "type": "standing_wave_mode_shape",
+                "title": "Standing Wave Modes",
+                "system_type": wave_type,
+                "length_m": L,
+                "velocity_mps": v,
+                "fundamental_hz": fundamental,
+                "harmonics": harmonics,
+                "mode_shapes": mode_shapes,
+            }
+            return with_diagram_payload(result, payload)
 
         except Exception as e:
             return f"Error in standing wave calculation: {str(e)}"
@@ -346,6 +463,7 @@ Interference Conditions:
 - Destructive: Δ = (m + ½)λ (m = 0, ±1, ±2, ...)
 
 """
+            classification = "partial"
             if "path_difference" in data or "delta" in data:
                 delta = float(data.get("path_difference", data.get("delta")))
                 m = delta / wavelength
@@ -356,12 +474,15 @@ Interference Conditions:
                 if abs(m - round(m)) < 0.01:
                     result += f"Result: CONSTRUCTIVE interference (m ≈ {round(m)})\n"
                     result += "Waves add in phase - maximum amplitude\n"
+                    classification = "constructive"
                 elif abs(m - round(m) - 0.5) < 0.01 or abs(m - round(m) + 0.5) < 0.01:
                     result += f"Result: DESTRUCTIVE interference (m + ½ ≈ {m:.1f})\n"
                     result += "Waves add out of phase - zero amplitude\n"
+                    classification = "destructive"
                 else:
                     result += f"Result: PARTIAL interference\n"
                     result += f"Not at a maximum or minimum - intermediate amplitude\n"
+                    classification = "partial"
 
             if "slit_separation" in data and "angle" in data:
                 d = float(data.get("slit_separation"))
@@ -377,7 +498,27 @@ Interference Conditions:
                 result += f"Path Difference: Δ = d sin(θ) = {delta:.2e} m\n"
                 result += f"Order: m = Δ/λ = {m:.2f}\n"
 
-            return result
+            d = float(data.get("slit_separation", 0.1e-3))
+            D = float(data.get("screen_distance", data.get("distance", 1.0)))
+            y_max = float(data.get("screen_half_height", 0.02))
+            samples_count = 121
+            samples = []
+            for i in range(samples_count):
+                y_m = -y_max + (2 * y_max * i) / (samples_count - 1)
+                phase = (2 * math.pi * d * y_m) / (wavelength * max(D, 1e-6))
+                intensity = (math.cos(phase / 2.0)) ** 2
+                samples.append({"y_m": y_m, "intensity_norm": intensity})
+
+            payload = {
+                "type": "interference_fringe_map",
+                "title": "Interference Fringe Map",
+                "wavelength_m": wavelength,
+                "slit_separation_m": d,
+                "screen_distance_m": D,
+                "classification": classification,
+                "samples": samples,
+            }
+            return with_diagram_payload(result, payload)
 
         except Exception as e:
             return f"Error in interference analysis: {str(e)}"
