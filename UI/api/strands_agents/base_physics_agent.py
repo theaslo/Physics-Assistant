@@ -19,6 +19,12 @@ from strands.models.ollama import OllamaModel
 from strands.tools.mcp import MCPClient
 from mcp.client.streamable_http import streamablehttp_client
 
+from force_quiz_reflection import (
+    build_force_quiz_reflection_response,
+    infer_newton_reflection_focus,
+    is_force_quiz_reflection_prompt,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -295,6 +301,56 @@ class StrandsPhysicsAgent(ABC):
                 prep_stage_started,
                 rag_context_used=rag_context is not None,
             )
+
+            if is_force_quiz_reflection_prompt(self.agent_id, problem):
+                reflection_stage_started = time.perf_counter()
+                reflection_result = self._build_force_quiz_reflection_mcp_response(problem)
+                self._append_perf_stage(
+                    perf_stages,
+                    "forces_quiz_reflection_mcp",
+                    reflection_stage_started,
+                    recovered=bool(reflection_result),
+                )
+                if reflection_result:
+                    execution_time_ms = int((time.time() - start_time) * 1000)
+                    db_stage_started = time.perf_counter()
+                    if self.db_client:
+                        self._log_interaction(
+                            problem=problem,
+                            solution=reflection_result["solution"],
+                            tools_used=reflection_result["tools_used"],
+                            execution_time_ms=execution_time_ms,
+                            user_id=user_id,
+                            session_id=session_id,
+                        )
+                    self._append_perf_stage(
+                        perf_stages,
+                        "database_log_interaction",
+                        db_stage_started,
+                        db_logging_enabled=self.db_client is not None,
+                    )
+                    perf_trace = self._build_perf_trace(perf_stages, perf_started)
+                    return {
+                        "success": True,
+                        "agent_id": self.agent_id,
+                        "problem": problem,
+                        "solution": reflection_result["solution"],
+                        "reasoning": "Used MCP check_equilibrium for Newton's-laws quiz reflection.",
+                        "tools_used": reflection_result["tools_used"],
+                        "execution_time_ms": execution_time_ms,
+                        "diagram": reflection_result.get("diagram"),
+                        "metadata": {
+                            "rag_enabled": self.rag_client is not None,
+                            "rag_context_used": rag_context is not None,
+                            "framework": "strands",
+                            "quiz_reflection_mode": {
+                                "enabled": True,
+                                "concept_tag": reflection_result["concept_tag"],
+                                "mcp_tool_called": True,
+                            },
+                            "performance_trace": perf_trace,
+                        },
+                    }
 
             fast_mcp_stage_started = time.perf_counter()
             fast_mcp_result = await self._try_fast_mcp_guided_solution(
@@ -1150,6 +1206,54 @@ class StrandsPhysicsAgent(ABC):
             "slowest_stage": slowest.get("stage", "none"),
             "slowest_duration_ms": int(slowest.get("duration_ms", 0)),
             "stages": stages,
+        }
+
+    def _build_force_quiz_reflection_mcp_response(self, problem: str) -> Optional[Dict[str, Any]]:
+        """Ground Newton quiz-reflection guidance in a simple MCP force-balance check."""
+        if not self.mcp_client:
+            return None
+
+        concept_tag = infer_newton_reflection_focus(problem)
+        if concept_tag == "newton_second_law":
+            forces = [
+                {"magnitude": 10, "angle": 0},
+                {"magnitude": 4, "angle": 180},
+            ]
+            tool_note = (
+                "I checked a simple unbalanced-force example, which reinforces that acceleration follows from net external force, "
+                "not from choosing the largest individual force."
+            )
+        else:
+            forces = [
+                {"magnitude": 10, "angle": 0},
+                {"magnitude": 10, "angle": 180},
+            ]
+            tool_note = (
+                "I checked a simple balanced-force example, which reinforces that rest or constant velocity corresponds to zero net external force."
+            )
+
+        try:
+            tool_result = self._call_mcp_tool_direct(
+                "check_equilibrium",
+                {"forces_data": json.dumps(forces)},
+            )
+        except Exception as exc:
+            logger.warning("Newton quiz reflection MCP grounding failed: %s", exc)
+            return None
+
+        raw_text = self._extract_text_from_mcp_tool_result(tool_result)
+        if not raw_text or self._is_mcp_error_text(raw_text):
+            return None
+
+        return {
+            "solution": build_force_quiz_reflection_response(
+                problem,
+                concept_tag=concept_tag,
+                tool_note=tool_note,
+            ),
+            "tools_used": ["check_equilibrium"],
+            "diagram": self._extract_diagram_from_text(raw_text),
+            "concept_tag": concept_tag,
         }
 
     async def _try_fast_mcp_guided_solution(

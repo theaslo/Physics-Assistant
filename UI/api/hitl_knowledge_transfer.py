@@ -17,6 +17,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
+from force_quiz_reflection import is_force_quiz_reflection_prompt
+
 try:
     from strands import Agent
     from strands.models.ollama import OllamaModel
@@ -120,6 +122,16 @@ class KnowledgeTransferGate:
         trace_stages: List[Dict[str, Any]] = []
         if not self.is_enabled_for(agent_id):
             self._append_trace_stage(trace_stages, "gate_disabled_or_not_pilot", trace_started, agent_id=agent_id)
+            return None, self._finalize_trace("maybe_create_check", trace_stages, trace_started)
+
+        if is_force_quiz_reflection_prompt(agent_id, problem):
+            stage_started = time.perf_counter()
+            self._append_trace_stage(
+                trace_stages,
+                "quiz_reflection_gate_skipped",
+                stage_started,
+                agent_id=agent_id,
+            )
             return None, self._finalize_trace("maybe_create_check", trace_stages, trace_started)
 
         stage_started = time.perf_counter()
