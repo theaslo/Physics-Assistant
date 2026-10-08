@@ -16,14 +16,15 @@ def is_force_quiz_reflection_prompt(agent_id: str, problem: str) -> bool:
     newton_context = any(
         re.search(pattern, lower)
         for pattern in (
-            r"newton'?s?\s*(?:1st|first|2nd|second)\s+law",
+            r"\bnewton(?:['’]s|s)?\s+laws?\b",
+            r"newton(?:['’]s|s)?\s*(?:1st|first|2nd|second)\s+laws?",
             r"\bfirst\s+law\b",
             r"\bsecond\s+law\b",
             r"\binertia\b",
             r"\bnet\s+force\b",
             r"\bf\s*=\s*m\s*a\b",
             r"\bsum\s*f\b",
-            r"\bΣ\s*f\b",
+            r"\b[σΣ]\s*f\b",
         )
     )
     reflection_context = any(
@@ -32,14 +33,18 @@ def is_force_quiz_reflection_prompt(agent_id: str, problem: str) -> bool:
             r"\bquiz\b",
             r"\btest\b",
             r"\bexam\b",
+            r"\breview(?:ing)?\b",
             r"\bmistake\b",
             r"\bwrong\b",
             r"\bincorrect\b",
             r"\bmissed\b",
+            r"\bmisunderstanding\b",
+            r"\breasoning\b",
             r"\breflection\b",
             r"\banaly[sz]e\b",
             r"\bmy\s+answer\b",
             r"\bcorrect\s+answer\b",
+            r"\bhelp\s+me\s+identify\b",
             r"\bwhy\s+(?:i|did|was)\b",
         )
     )
@@ -50,12 +55,12 @@ def is_force_quiz_reflection_prompt(agent_id: str, problem: str) -> bool:
 def infer_newton_reflection_focus(problem: str) -> str:
     lower = (problem or "").lower()
     if re.search(
-        r"newton'?s?\s*(?:1st|first)\s+law|\bfirst\s+law\b|\binertia\b|constant\s+velocity|at\s+rest",
+        r"newton(?:['’]s|s)?\s*(?:1st|first)\s+laws?|\bfirst\s+law\b|\binertia\b|constant\s+velocity|at\s+rest",
         lower,
     ):
         return "newton_first_law"
     if re.search(
-        r"newton'?s?\s*(?:2nd|second)\s+law|\bsecond\s+law\b|\bf\s*=\s*m\s*a\b|\bsum\s*f\b|\bnet\s+force\b|\baccelerat",
+        r"newton(?:['’]s|s)?\s*(?:2nd|second)\s+laws?|\bsecond\s+law\b|\bf\s*=\s*m\s*a\b|\bsum\s*f\b|\bnet\s+force\b|\baccelerat",
         lower,
     ):
         return "newton_second_law"

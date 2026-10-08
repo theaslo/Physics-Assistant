@@ -209,6 +209,20 @@ class HitlRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(check)
         self.assertIn("quiz_reflection_gate_skipped", [stage["stage"] for stage in trace["stages"]])
 
+    async def test_generic_newton_laws_quiz_review_skips_hitl_gate(self):
+        check, trace = await self.gate.maybe_create_check_with_trace(
+            agent_id="forces_agent",
+            problem=(
+                "I am reviewing a quiz about Newton’s laws and forces. "
+                "My answer and reasoning are below. Help me identify my misunderstanding. "
+                "Please ask me one question at a time and give hints before revealing the answer."
+            ),
+            user_id="student-a",
+        )
+
+        self.assertIsNone(check)
+        self.assertIn("quiz_reflection_gate_skipped", [stage["stage"] for stage in trace["stages"]])
+
     async def test_second_hitl_leg_scores_correct_answer_and_logs_attempt(self):
         check, _ = await self.gate.maybe_create_check_with_trace(
             agent_id="forces_agent",
