@@ -223,6 +223,23 @@ class HitlRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(check)
         self.assertIn("quiz_reflection_gate_skipped", [stage["stage"] for stage in trace["stages"]])
 
+    async def test_hockey_puck_quiz_answer_skips_hitl_gate(self):
+        check, trace = await self.gate.maybe_create_check_with_trace(
+            agent_id="forces_agent",
+            problem=(
+                "(5 pts) Suppose you are playing hockey on a new-age ice surface for which there is no friction "
+                "between the ice and the hockey puck. You wind up and hit the puck as hard as you can. "
+                "After the puck loses contact with your stick, the puck will A) start to slow down. "
+                "B) not slow down or speed up. C) speed up a little, and then slow down. "
+                "D) speed up a little, and then move at a constant speed. "
+                "I said A because it should speed up since I hit it first."
+            ),
+            user_id="student-a",
+        )
+
+        self.assertIsNone(check)
+        self.assertIn("quiz_reflection_gate_skipped", [stage["stage"] for stage in trace["stages"]])
+
     async def test_second_hitl_leg_scores_correct_answer_and_logs_attempt(self):
         check, _ = await self.gate.maybe_create_check_with_trace(
             agent_id="forces_agent",
@@ -365,9 +382,9 @@ class HitlApiRouteRegressionTests(unittest.IsolatedAsyncioTestCase):
                     "agent_id": "forces_agent",
                     "problem": problem,
                     "solution": (
-                        "Newton's Laws Quiz Reflection Mode\n\n"
-                        "I will not start by giving you a new multiple-choice force check.\n\n"
-                        "Concept focus: Newton's Second Law uses net external force."
+                        "Quiz 4 Reflection with Physics AI Tutor\n\n"
+                        "Let's work through your Quiz 4 reflection one quiz question at a time.\n\n"
+                        "First question: What object or system is the quiz question asking about?"
                     ),
                     "tools_used": ["check_equilibrium"],
                     "metadata": {
@@ -399,9 +416,10 @@ class HitlApiRouteRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertTrue(response.success)
-        self.assertIn("Newton's Laws Quiz Reflection Mode", response.solution)
-        self.assertIn("I will not start by giving you a new multiple-choice force check", response.solution)
-        self.assertIn("net external force", response.solution)
+        self.assertIn("Quiz 4 Reflection with Physics AI Tutor", response.solution)
+        self.assertIn("First question:", response.solution)
+        self.assertNotIn("I will not start by giving you a new multiple-choice force check", response.solution)
+        self.assertNotIn("Concept focus:", response.solution)
         self.assertNotIn("What should you do before calculating this force problem", response.solution)
         self.assertIsNone(response.hitl)
         self.assertEqual(response.tools_used, ["check_equilibrium"])

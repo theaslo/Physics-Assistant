@@ -27,6 +27,23 @@ def is_force_quiz_reflection_prompt(agent_id: str, problem: str) -> bool:
             r"\b[σΣ]\s*f\b",
         )
     )
+    physics_quiz_context = any(
+        re.search(pattern, lower)
+        for pattern in (
+            r"\bhockey\b",
+            r"\bpuck\b",
+            r"\bstick\b",
+            r"\bfrictionless\b",
+            r"\bno\s+friction\b",
+            r"\bconstant\s+speed\b",
+            r"\bslow\s+down\b",
+            r"\bspeed\s+up\b",
+            r"\bforces?\s+balance\b",
+            r"\bcrate\b",
+            r"\bthree\s+forces\b",
+            r"\bcomponents?\b",
+        )
+    )
     reflection_context = any(
         re.search(pattern, lower)
         for pattern in (
@@ -48,14 +65,19 @@ def is_force_quiz_reflection_prompt(agent_id: str, problem: str) -> bool:
             r"\bwhy\s+(?:i|did|was)\b",
         )
     )
+    submitted_quiz_answer = (
+        bool(re.search(r"\b(?:i\s+said|i\s+answered|i\s+chose|my\s+answer)\s+[a-d]\b", lower))
+        or bool(re.search(r"\b[abcd]\)\s+", lower))
+        or bool(re.search(r"\(\s*\d+\s*pts?\s*\)", lower))
+    ) and any(keyword in lower for keyword in ("because", "reasoning", "i said", "my answer", "i answered", "i chose"))
 
-    return newton_context and reflection_context
+    return (newton_context and reflection_context) or (physics_quiz_context and submitted_quiz_answer)
 
 
 def infer_newton_reflection_focus(problem: str) -> str:
     lower = (problem or "").lower()
     if re.search(
-        r"newton(?:['’]s|s)?\s*(?:1st|first)\s+laws?|\bfirst\s+law\b|\binertia\b|constant\s+velocity|at\s+rest",
+        r"newton(?:['’]s|s)?\s*(?:1st|first)\s+laws?|\bfirst\s+law\b|\binertia\b|constant\s+velocity|at\s+rest|\bpuck\b|\bfrictionless\b|\bno\s+friction\b|\bconstant\s+speed\b|\bslow\s+down\b|\bspeed\s+up\b",
         lower,
     ):
         return "newton_first_law"
@@ -73,73 +95,68 @@ def build_force_quiz_reflection_response(
     concept_tag: Optional[str] = None,
     tool_note: Optional[str] = None,
 ) -> str:
-    """Build a reflection-first response for Newton quiz mistake analysis."""
-    focus = concept_tag or infer_newton_reflection_focus(problem)
+    """Build the homework-oriented first turn for Newton quiz reflection."""
     lower = (problem or "").lower()
-    has_student_answer = any(marker in lower for marker in ("my answer", "i answered", "i chose", "i picked", "i said"))
-    has_correct_answer = "correct answer" in lower or "right answer" in lower or "answer key" in lower
-    has_question = "question" in lower or "prompt" in lower or "asked" in lower
-
-    if focus == "newton_first_law":
-        concept_focus = (
-            "Newton's First Law: an object at rest stays at rest, and an object moving at constant velocity keeps moving "
-            "unless a nonzero net external force changes its motion."
-        )
-        common_misconception = (
-            "A common mistake is thinking motion requires a forward net force. Constant velocity means the net force is zero, "
-            "not that there must be a force in the direction of motion."
-        )
-    elif focus == "newton_second_law":
-        concept_focus = (
-            "Newton's Second Law: acceleration is determined by the net external force on the chosen object, "
-            "so the useful equation is sum F = ma."
-        )
-        common_misconception = (
-            "A common mistake is using one individual force as ma instead of adding forces with directions first. "
-            "Balanced forces give zero acceleration even if the object is moving."
-        )
-    else:
-        concept_focus = (
-            "Newton's laws reflection: first decide whether the question is about constant motion/no net force "
-            "or about acceleration caused by a net force."
-        )
-        common_misconception = (
-            "A common mistake is mixing up velocity and acceleration: motion itself does not prove there is a nonzero net force."
-        )
-
-    targeted_feedback = _targeted_reflection_feedback(lower, focus)
-    details_prompt = ""
-    if not (has_question and has_student_answer and has_correct_answer):
-        details_prompt = (
-            "\n\nTo analyze your exact mistake, paste these four parts:\n"
-            "1. The quiz question.\n"
-            "2. Your original answer.\n"
-            "3. The correct answer or answer-key reasoning.\n"
-            "4. Why you chose your answer at the time."
-        )
+    has_quiz_details = _has_quiz_submission_details(lower)
 
     sections = [
-        "Newton's Laws Quiz Reflection Mode",
-        "I will not start by giving you a new multiple-choice force check. Instead, we will analyze the quiz mistake you already made.",
-        f"Concept focus: {concept_focus}",
-        f"Likely misconception to check: {common_misconception}",
+        "Quiz 4 Reflection with Physics AI Tutor",
+        (
+            "Let's work through your Quiz 4 reflection one quiz question at a time. "
+            "I will ask questions and give hints before revealing an answer."
+        ),
     ]
-    if targeted_feedback:
-        sections.append(f"For your answer: {targeted_feedback}")
-    if tool_note:
-        sections.append(f"MCP force-balance check: {tool_note}")
-    sections.append(
-        "Use this reflection structure:\n"
-        "- My original thinking was: ...\n"
-        "- The correct physics idea is: ...\n"
-        "- The mistake in my reasoning was: ...\n"
-        "- Next time, I will check: net force, acceleration, and whether the motion is constant or changing."
-    )
-    sections.append(
-        "If you already included the quiz question, your answer, and the correct answer, send them in that format and I will help you tighten the reflection."
-        f"{details_prompt}"
-    )
+
+    if has_quiz_details:
+        sections.append(
+            f"First question: {_first_reflection_question(lower)}"
+        )
+        sections.append(
+            "Reply with that one answer first. After that, I will ask the next question and help you check your reasoning."
+        )
+    else:
+        sections.append(
+            "First question: Which missed Quiz 4 question do you want to review first?"
+        )
+        sections.append(
+            "Paste that one quiz question with your original answer and your original reasoning. "
+            "Keep your original reasoning visible even if it was incorrect."
+        )
+
     return "\n\n".join(sections)
+
+
+def _has_quiz_submission_details(lower: str) -> bool:
+    detail_markers = (
+        "quiz question:",
+        "question:",
+        "q1",
+        "q2",
+        "q3",
+        "q4",
+        "my original answer:",
+        "my answer:",
+        "my reasoning:",
+        "i answered",
+        "i chose",
+        "i picked",
+        "i said",
+        "because",
+        "(5 pts)",
+    )
+    return any(marker in lower for marker in detail_markers)
+
+
+def _first_reflection_question(lower: str) -> str:
+    if "puck" in lower or "hockey" in lower:
+        return "After the puck loses contact with the stick, what horizontal forces are still acting on the puck?"
+    if "crate" in lower:
+        return "For the crate, what forces act on it while it remains at rest?"
+    if "three forces" in lower or "component" in lower:
+        return "For equilibrium, what must be true about the sum of the x-components and the sum of the y-components?"
+    if "speed" in lower and "net force" in lower:
+        return "If the net force points in the direction of motion, what happens to the object's speed while that net force is present?"
+    return "What object or system is the quiz question asking about?"
 
 
 def _targeted_reflection_feedback(lower: str, focus: str) -> str:

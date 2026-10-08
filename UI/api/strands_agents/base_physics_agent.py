@@ -1219,18 +1219,11 @@ class StrandsPhysicsAgent(ABC):
                 {"magnitude": 10, "angle": 0},
                 {"magnitude": 4, "angle": 180},
             ]
-            tool_note = (
-                "I checked a simple unbalanced-force example, which reinforces that acceleration follows from net external force, "
-                "not from choosing the largest individual force."
-            )
         else:
             forces = [
                 {"magnitude": 10, "angle": 0},
                 {"magnitude": 10, "angle": 180},
             ]
-            tool_note = (
-                "I checked a simple balanced-force example, which reinforces that rest or constant velocity corresponds to zero net external force."
-            )
 
         try:
             tool_result = self._call_mcp_tool_direct(
@@ -1249,10 +1242,9 @@ class StrandsPhysicsAgent(ABC):
             "solution": build_force_quiz_reflection_response(
                 problem,
                 concept_tag=concept_tag,
-                tool_note=tool_note,
             ),
             "tools_used": ["check_equilibrium"],
-            "diagram": self._extract_diagram_from_text(raw_text),
+            "diagram": None,
             "concept_tag": concept_tag,
         }
 
