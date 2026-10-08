@@ -195,6 +195,51 @@ class HitlRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("newton_second_law", check["reason_tags"])
         self.assertIn("contextual_question_build", [stage["stage"] for stage in trace["stages"]])
 
+    async def test_newton_quiz_reflection_prompt_skips_hitl_gate(self):
+        check, trace = await self.gate.maybe_create_check_with_trace(
+            agent_id="forces_agent",
+            problem=(
+                "I need to analyze my mistake on a Newton's 1st law quiz. "
+                "The question asked about constant velocity, my answer was that a forward force is needed, "
+                "and the correct answer says net force is zero."
+            ),
+            user_id="student-a",
+        )
+
+        self.assertIsNone(check)
+        self.assertIn("quiz_reflection_gate_skipped", [stage["stage"] for stage in trace["stages"]])
+
+    async def test_generic_newton_laws_quiz_review_skips_hitl_gate(self):
+        check, trace = await self.gate.maybe_create_check_with_trace(
+            agent_id="forces_agent",
+            problem=(
+                "I am reviewing a quiz about Newton’s laws and forces. "
+                "My answer and reasoning are below. Help me identify my misunderstanding. "
+                "Please ask me one question at a time and give hints before revealing the answer."
+            ),
+            user_id="student-a",
+        )
+
+        self.assertIsNone(check)
+        self.assertIn("quiz_reflection_gate_skipped", [stage["stage"] for stage in trace["stages"]])
+
+    async def test_hockey_puck_quiz_answer_skips_hitl_gate(self):
+        check, trace = await self.gate.maybe_create_check_with_trace(
+            agent_id="forces_agent",
+            problem=(
+                "(5 pts) Suppose you are playing hockey on a new-age ice surface for which there is no friction "
+                "between the ice and the hockey puck. You wind up and hit the puck as hard as you can. "
+                "After the puck loses contact with your stick, the puck will A) start to slow down. "
+                "B) not slow down or speed up. C) speed up a little, and then slow down. "
+                "D) speed up a little, and then move at a constant speed. "
+                "I said A because it should speed up since I hit it first."
+            ),
+            user_id="student-a",
+        )
+
+        self.assertIsNone(check)
+        self.assertIn("quiz_reflection_gate_skipped", [stage["stage"] for stage in trace["stages"]])
+
     async def test_second_hitl_leg_scores_correct_answer_and_logs_attempt(self):
         check, _ = await self.gate.maybe_create_check_with_trace(
             agent_id="forces_agent",
@@ -313,6 +358,75 @@ class HitlApiRouteRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(response.hitl["was_correct"])
         self.assertIn("do you understand why this answer is not correct", response.solution)
         self.assertIsNone(response.tools_used)
+
+    async def test_forces_quiz_reflection_route_skips_hitl_question_and_uses_solver(self):
+        gate_calls: List[Dict[str, Any]] = []
+        solver_calls: List[str] = []
+
+        class StubGate:
+            def is_enabled_for(self, agent_id: str) -> bool:
+                return True
+
+            async def maybe_create_check_with_trace(self, **kwargs: Any):
+                gate_calls.append(kwargs)
+                return None, {
+                    "operation": "maybe_create_check",
+                    "stages": [{"stage": "quiz_reflection_gate_skipped"}],
+                }
+
+        class StubAgent:
+            async def solve_problem(self, problem: str, **kwargs: Any):
+                solver_calls.append(problem)
+                return {
+                    "success": True,
+                    "agent_id": "forces_agent",
+                    "problem": problem,
+                    "solution": (
+                        "Quiz 4 Reflection with Physics AI Tutor\n\n"
+                        "Let's work through your Quiz 4 reflection one quiz question at a time.\n\n"
+                        "First question: What object or system is the quiz question asking about?"
+                    ),
+                    "tools_used": ["check_equilibrium"],
+                    "metadata": {
+                        "framework": "strands",
+                        "quiz_reflection_mode": {
+                            "enabled": True,
+                            "concept_tag": "newton_second_law",
+                            "mcp_tool_called": True,
+                        },
+                    },
+                }
+
+        async def fake_get_or_create_agent(*args: Any, **kwargs: Any):
+            return StubAgent()
+
+        self.api_main.knowledge_transfer_gate = StubGate()
+        self.api_main.get_or_create_agent = fake_get_or_create_agent
+
+        response = await self.api_main.solve_problem(
+            "forces_agent",
+            self.api_main.ProblemSolveRequest(
+                problem=(
+                    "I am analyzing a mistake from my Newton's 2nd law quiz. "
+                    "The quiz question asked about net force and acceleration. "
+                    "My answer used the biggest force as ma, but the correct answer says to use net force."
+                ),
+                user_id="student-a",
+            ),
+        )
+
+        self.assertTrue(response.success)
+        self.assertIn("Quiz 4 Reflection with Physics AI Tutor", response.solution)
+        self.assertIn("First question:", response.solution)
+        self.assertNotIn("I will not start by giving you a new multiple-choice force check", response.solution)
+        self.assertNotIn("Concept focus:", response.solution)
+        self.assertNotIn("What should you do before calculating this force problem", response.solution)
+        self.assertIsNone(response.hitl)
+        self.assertEqual(response.tools_used, ["check_equilibrium"])
+        self.assertEqual(len(gate_calls), 1)
+        self.assertEqual(len(solver_calls), 1)
+        self.assertTrue(response.metadata["quiz_reflection_mode"]["enabled"])
+        self.assertEqual(response.metadata["quiz_reflection_mode"]["concept_tag"], "newton_second_law")
 
     async def test_remediation_next_step_followup_returns_scaffold_without_solver(self):
         async def fail_get_or_create_agent(*args: Any, **kwargs: Any):

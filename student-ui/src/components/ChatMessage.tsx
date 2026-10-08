@@ -100,6 +100,17 @@ function ForceVectorSvg({
         )}
 
         {vectors.map((force, idx) => {
+          if (Math.abs(force.magnitude_n) < 0.01) {
+            return (
+              <g key={`${force.name}-${idx}`}>
+                <circle cx={cx} cy={cy} r="3.5" fill={force.color || '#1565C0'} />
+                <text x={cx + 8} y={cy - 8} fontSize="10" fill="#1F2937">
+                  {force.name}: 0.0 N
+                </text>
+              </g>
+            )
+          }
+
           const radians = (force.angle_deg * Math.PI) / 180
           const scale = Math.min(1.5, Math.max(0.45, force.magnitude_n / 30))
           const length = 70 * scale
@@ -181,11 +192,27 @@ function ForceComponentsDiagram({ diagram, markerId }: { diagram: ForceComponent
 }
 
 function EquilibriumDiagram({ diagram, markerId }: { diagram: EquilibriumResidualDiagramPayload; markerId: string }) {
+  if (diagram.is_equilibrium) {
+    return (
+      <Box sx={{ mt: 1.5, p: 1.5, border: '1px solid', borderColor: 'success.light', borderRadius: 2, bgcolor: '#ECFDF5' }}>
+        <Typography variant="subtitle2" sx={{ mb: 1 }}>
+          {diagram.title}
+        </Typography>
+        <Chip label="Net force = 0 N" color="success" size="small" sx={{ mb: 1 }} />
+        <Typography variant="body2" color="text.secondary">
+          The forces balance, so there is no net-force arrow to draw. An object at rest stays at rest, and an object already moving continues at constant velocity.
+        </Typography>
+      </Box>
+    )
+  }
+
   const vectors: Array<DiagramForce & { color?: string }> = [
     ...diagram.forces.map((f) => ({ ...f, color: '#2563EB' })),
-    { ...diagram.net_force, color: '#DC2626' },
   ]
-  if (diagram.balancing_force) {
+  if (!diagram.is_equilibrium) {
+    vectors.push({ ...diagram.net_force, color: '#DC2626' })
+  }
+  if (!diagram.is_equilibrium && diagram.balancing_force) {
     vectors.push({ ...diagram.balancing_force, color: '#059669' })
   }
 
@@ -193,7 +220,9 @@ function EquilibriumDiagram({ diagram, markerId }: { diagram: EquilibriumResidua
     <Box>
       <ForceVectorSvg title={diagram.title} vectors={vectors} markerId={markerId} />
       <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-        {diagram.is_equilibrium ? 'System is in equilibrium.' : 'Red = net force, Green = balancing force.'}
+        {diagram.is_equilibrium
+          ? 'System is in equilibrium: the force arrows cancel, so the net force is 0 N.'
+          : 'Red = net force, Green = balancing force.'}
       </Typography>
     </Box>
   )

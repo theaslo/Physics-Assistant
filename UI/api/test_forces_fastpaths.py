@@ -149,6 +149,102 @@ class ForcesFastPathTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Acceleration magnitude: 2.36 m/s", result["solution"])
         self.assertEqual(result["diagram"]["type"], "inclined_plane_diagram")
 
+    async def test_newton_quiz_reflection_uses_mcp_without_generic_hitl(self):
+        agent = ForcesAgent(enable_database_logging=False, enable_rag=False)
+        calls = []
+        case = self
+
+        class FakeMcpClient:
+            def call_tool_sync(self, tool_use_id, name, arguments):
+                calls.append((name, arguments))
+                case.assertEqual(name, "check_equilibrium")
+                return {
+                    "status": "success",
+                    "content": [
+                        {
+                            "text": (
+                                "Equilibrium Analysis:\n"
+                                "Net Force = 6.00 N at 0.0 degrees\n"
+                                "NOT IN EQUILIBRIUM"
+                            )
+                        }
+                    ],
+                }
+
+        async def fake_initialize() -> None:
+            agent.initialized = True
+            agent.mcp_client = FakeMcpClient()
+
+        async def forbidden_llm_router(*args, **kwargs):
+            raise AssertionError("Reflection mode should use the direct MCP grounding path")
+
+        async def forbidden_full_agent(*args, **kwargs):
+            raise AssertionError("Reflection mode should not fall through to the full agent")
+
+        agent.initialize = fake_initialize
+        agent._build_fast_mcp_plan_with_llm = forbidden_llm_router
+        agent._call_agent_async = forbidden_full_agent
+
+        result = await agent.solve_problem(
+            problem=(
+                "I am analyzing a mistake from my Newton's 2nd law quiz. "
+                "The quiz question asked about net force and acceleration. "
+                "My answer used the biggest force as ma, but the correct answer says to use net force."
+            ),
+            user_id="student-a",
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["tools_used"], ["check_equilibrium"])
+        self.assertEqual(calls[0][0], "check_equilibrium")
+        self.assertIn("Quiz 4 Reflection with Physics AI Tutor", result["solution"])
+        self.assertIn("First question:", result["solution"])
+        self.assertNotIn("MCP force-balance check", result["solution"])
+        self.assertNotIn("Concept focus:", result["solution"])
+        self.assertIsNone(result["diagram"])
+        self.assertTrue(result["metadata"]["quiz_reflection_mode"]["enabled"])
+        self.assertEqual(result["metadata"]["quiz_reflection_mode"]["concept_tag"], "newton_second_law")
+
+    async def test_hockey_puck_quiz_reflection_asks_targeted_first_question(self):
+        agent = ForcesAgent(enable_database_logging=False, enable_rag=False)
+
+        class FakeMcpClient:
+            def call_tool_sync(self, tool_use_id, name, arguments):
+                return {
+                    "status": "success",
+                    "content": [{"text": "Equilibrium Analysis:\nEQUILIBRIUM ACHIEVED!"}],
+                }
+
+        async def fake_initialize() -> None:
+            agent.initialized = True
+            agent.mcp_client = FakeMcpClient()
+
+        async def forbidden_full_agent(*args, **kwargs):
+            raise AssertionError("Reflection mode should not fall through to the full agent")
+
+        agent.initialize = fake_initialize
+        agent._call_agent_async = forbidden_full_agent
+
+        result = await agent.solve_problem(
+            problem=(
+                "(5 pts) Suppose you are playing hockey on a new-age ice surface for which there is no friction "
+                "between the ice and the hockey puck. You wind up and hit the puck as hard as you can. "
+                "After the puck loses contact with your stick, the puck will A) start to slow down. "
+                "B) not slow down or speed up. C) speed up a little, and then slow down. "
+                "D) speed up a little, and then move at a constant speed. "
+                "I said A because it should speed up since I hit it first."
+            ),
+            user_id="student-a",
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["tools_used"], ["check_equilibrium"])
+        self.assertIn("Quiz 4 Reflection with Physics AI Tutor", result["solution"])
+        self.assertIn("After the puck loses contact with the stick", result["solution"])
+        self.assertNotIn("What should you do before calculating this force problem", result["solution"])
+        self.assertNotIn("MCP force-balance check", result["solution"])
+        self.assertIsNone(result["diagram"])
+
 
 if __name__ == "__main__":
     unittest.main()
