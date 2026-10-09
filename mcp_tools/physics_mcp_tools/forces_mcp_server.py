@@ -55,6 +55,34 @@ def serve(host, port, transport):  # noqa: PLR0915
 
 
     @mcp.tool()
+    @create_tool_wrapper(db_logger, "get_force_principles")
+    async def get_force_principles() -> str:
+        """Get force laws and direction rules for qualitative reasoning without assumed numerical inputs."""
+        return (
+            "Newton's laws: In an inertial frame, zero net external force means zero acceleration, "
+            "not necessarily zero velocity. Net force equals mass times acceleration; acceleration follows "
+            "net force, not necessarily velocity. Third-law force pairs act on different objects.\n"
+            "Kinetic friction: Acts parallel to the contact surface, opposite the object's sliding velocity "
+            "relative to that surface. Sliding down a stationary incline gives friction up the incline; "
+            "sliding up gives friction down. Unknown sliding direction does not specify a unique friction direction. "
+            "Its magnitude is mu_k times the normal force.\n"
+            "Static friction: Opposes impending relative slipping at the contact, not necessarily the object's "
+            "overall motion; its magnitude adjusts from zero up to mu_s times the normal force. "
+            "It can be zero, and is not always equal to its maximum. A frictionless surface exerts no friction.\n"
+            "Normal force: Perpendicular to the contact surface, pushing away from it. Its magnitude follows "
+            "force balance perpendicular to the surface; it is not always equal to weight. "
+            "For an object on a fixed incline with no other perpendicular forces or perpendicular acceleration, "
+            "N = mg cos(theta). Weight points vertically downward.\n"
+            "Spring force: For an ideal spring, F_s = -kx; displacement is measured from the unstretched "
+            "position. It pulls back when stretched and pushes back when compressed; zero displacement gives "
+            "zero spring force. Its direction follows displacement, not velocity.\n"
+            "Tension: An ideal taut rope pulls along itself away from the object. Tension equals weight only "
+            "when the applicable force balance gives that result; acceleration or multiple ropes changes it.\n"
+            "Equilibrium: Each component of net force is zero. Nonzero forces may cancel. If all forces are "
+            "individually zero there are no force arrows. Do not confuse a zero resultant with zero individual forces."
+        )
+
+    @mcp.tool()
     @create_tool_wrapper(db_logger, "add_forces_1d")
     async def add_forces_1d(forces: str) -> str:
         """Add forces in one dimension (along a line).
