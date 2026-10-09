@@ -18,7 +18,7 @@ import {
   Menu as MenuIcon,
   Science as ScienceIcon,
 } from '@mui/icons-material'
-import { useStore, useMessages, useSelectedAgentInfo, type StudentDrawing } from '../stores/chat-store'
+import { useStore, useMessages, useSelectedAgentInfo, type Message, type StudentDrawing } from '../stores/chat-store'
 import { apiClient, type SolveResponse } from '../services/api-client'
 import AgentSelector from '../components/AgentSelector'
 import ChatMessage from '../components/ChatMessage'
@@ -49,6 +49,32 @@ function serializeDrawingForAnalysis(drawing?: StudentDrawing) {
     height: drawing.height,
     created_at: drawing.createdAt,
     strokes: drawing.strokes || [],
+  }
+}
+
+function buildConversationContext(messages: Message[], agentId: string) {
+  const recentMessages = messages
+    .filter((message) => message.agentId === agentId)
+    .slice(-6)
+    .map((message) => ({
+      role: message.role,
+      content: message.content.slice(0, 2000),
+      agent_id: message.agentId,
+      tools_used: message.toolsUsed || [],
+      has_diagram: Boolean(message.diagram),
+    }))
+
+  if (recentMessages.length === 0) {
+    return undefined
+  }
+
+  const previousUserProblem = [...recentMessages].reverse().find((message) => message.role === 'user')?.content
+  const previousAssistantResponse = [...recentMessages].reverse().find((message) => message.role === 'assistant')?.content
+
+  return {
+    recent_messages: recentMessages,
+    previous_user_problem: previousUserProblem,
+    previous_assistant_response: previousAssistantResponse,
   }
 }
 
@@ -157,6 +183,7 @@ export default function ChatPage() {
         setError('Select a physics agent before sending a message.')
         return
       }
+      const conversationContext = buildConversationContext(messages, agentForMessage)
 
       // Add user message
       const userMessage = {
@@ -242,11 +269,10 @@ export default function ChatPage() {
           agentForMessage,
           trimmedMessage,
           user?.username || 'react_user',
-          drawingAnalysisPayload
-            ? {
-                student_drawing: drawingAnalysisPayload,
-              }
-            : undefined
+          {
+            ...(drawingAnalysisPayload ? { student_drawing: drawingAnalysisPayload } : {}),
+            ...(conversationContext ? { conversation_context: conversationContext } : {}),
+          }
         )
 
         if (response.hitl?.status === 'question_required') {
@@ -281,6 +307,7 @@ export default function ChatPage() {
     [
       selectedAgent,
       user,
+      messages,
       pendingKnowledgeCheck,
       pendingHitlRemediation,
       addMessage,

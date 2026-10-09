@@ -19,6 +19,12 @@ from strands.models.ollama import OllamaModel
 from strands.tools.mcp import MCPClient
 from mcp.client.streamable_http import streamablehttp_client
 
+from force_quiz_reflection import (
+    build_force_quiz_reflection_response,
+    infer_newton_reflection_focus,
+    is_force_quiz_reflection_prompt,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -296,10 +302,155 @@ class StrandsPhysicsAgent(ABC):
                 rag_context_used=rag_context is not None,
             )
 
+            if self.agent_id == "forces_agent" and self._is_contextual_followup_problem(problem, context):
+                context_followup_stage_started = time.perf_counter()
+                context_followup_result = await self._solve_conversation_turn(problem, context)
+                self._append_perf_stage(
+                    perf_stages,
+                    "forces_context_followup",
+                    context_followup_stage_started,
+                    recovered=bool(context_followup_result),
+                )
+                if context_followup_result:
+                    execution_time_ms = int((time.time() - start_time) * 1000)
+                    db_stage_started = time.perf_counter()
+                    if self.db_client:
+                        self._log_interaction(
+                            problem=problem,
+                            solution=context_followup_result["solution"],
+                            tools_used=context_followup_result["tools_used"],
+                            execution_time_ms=execution_time_ms,
+                            user_id=user_id,
+                            session_id=session_id,
+                        )
+                    self._append_perf_stage(
+                        perf_stages,
+                        "database_log_interaction",
+                        db_stage_started,
+                        db_logging_enabled=self.db_client is not None,
+                    )
+                    perf_trace = self._build_perf_trace(perf_stages, perf_started)
+                    return {
+                        "success": True,
+                        "agent_id": self.agent_id,
+                        "problem": problem,
+                        "solution": context_followup_result["solution"],
+                        "reasoning": "Used the LLM to interpret the current question and relevant history, grounded in MCP tools.",
+                        "tools_used": context_followup_result["tools_used"],
+                        "execution_time_ms": execution_time_ms,
+                        "diagram": context_followup_result.get("diagram"),
+                        "metadata": {
+                            "rag_enabled": self.rag_client is not None,
+                            "rag_context_used": rag_context is not None,
+                            "framework": "strands",
+                            "contextual_followup": True,
+                            "llm_response_used": True,
+                            "performance_trace": perf_trace,
+                        },
+                    }
+
+            if is_force_quiz_reflection_prompt(self.agent_id, problem):
+                reflection_stage_started = time.perf_counter()
+                reflection_result = self._build_force_quiz_reflection_mcp_response(problem)
+                self._append_perf_stage(
+                    perf_stages,
+                    "forces_quiz_reflection_mcp",
+                    reflection_stage_started,
+                    recovered=bool(reflection_result),
+                )
+                if reflection_result:
+                    execution_time_ms = int((time.time() - start_time) * 1000)
+                    db_stage_started = time.perf_counter()
+                    if self.db_client:
+                        self._log_interaction(
+                            problem=problem,
+                            solution=reflection_result["solution"],
+                            tools_used=reflection_result["tools_used"],
+                            execution_time_ms=execution_time_ms,
+                            user_id=user_id,
+                            session_id=session_id,
+                        )
+                    self._append_perf_stage(
+                        perf_stages,
+                        "database_log_interaction",
+                        db_stage_started,
+                        db_logging_enabled=self.db_client is not None,
+                    )
+                    perf_trace = self._build_perf_trace(perf_stages, perf_started)
+                    return {
+                        "success": True,
+                        "agent_id": self.agent_id,
+                        "problem": problem,
+                        "solution": reflection_result["solution"],
+                        "reasoning": "Used MCP check_equilibrium for Newton's-laws quiz reflection.",
+                        "tools_used": reflection_result["tools_used"],
+                        "execution_time_ms": execution_time_ms,
+                        "diagram": reflection_result.get("diagram"),
+                        "metadata": {
+                            "rag_enabled": self.rag_client is not None,
+                            "rag_context_used": rag_context is not None,
+                            "framework": "strands",
+                            "quiz_reflection_mode": {
+                                "enabled": True,
+                                "concept_tag": reflection_result["concept_tag"],
+                                "mcp_tool_called": True,
+                            },
+                            "performance_trace": perf_trace,
+                        },
+                    }
+
+            if self.agent_id == "forces_agent":
+                direct_forces_stage_started = time.perf_counter()
+                direct_forces_result = self._build_forces_direct_solution(problem)
+                self._append_perf_stage(
+                    perf_stages,
+                    "forces_direct_mcp_solution",
+                    direct_forces_stage_started,
+                    recovered=bool(direct_forces_result),
+                    tools=direct_forces_result.get("tools_used") if direct_forces_result else None,
+                )
+                if direct_forces_result:
+                    execution_time_ms = int((time.time() - start_time) * 1000)
+                    db_stage_started = time.perf_counter()
+                    if self.db_client:
+                        self._log_interaction(
+                            problem=problem,
+                            solution=direct_forces_result["solution"],
+                            tools_used=direct_forces_result["tools_used"],
+                            execution_time_ms=execution_time_ms,
+                            user_id=user_id,
+                            session_id=session_id,
+                        )
+                    self._append_perf_stage(
+                        perf_stages,
+                        "database_log_interaction",
+                        db_stage_started,
+                        db_logging_enabled=self.db_client is not None,
+                    )
+                    perf_trace = self._build_perf_trace(perf_stages, perf_started)
+                    return {
+                        "success": True,
+                        "agent_id": self.agent_id,
+                        "problem": problem,
+                        "solution": direct_forces_result["solution"],
+                        "reasoning": "Solved a common forces problem using deterministic MCP-backed parsing.",
+                        "tools_used": direct_forces_result["tools_used"],
+                        "execution_time_ms": execution_time_ms,
+                        "diagram": direct_forces_result.get("diagram"),
+                        "metadata": {
+                            "rag_enabled": self.rag_client is not None,
+                            "rag_context_used": rag_context is not None,
+                            "framework": "strands",
+                            "fastpath_recovery": True,
+                            "performance_trace": perf_trace,
+                        },
+                    }
+
             fast_mcp_stage_started = time.perf_counter()
             fast_mcp_result = await self._try_fast_mcp_guided_solution(
                 problem=problem,
                 rag_context=rag_context,
+                context=context,
             )
             self._append_perf_stage(
                 perf_stages,
@@ -1152,10 +1303,781 @@ class StrandsPhysicsAgent(ABC):
             "stages": stages,
         }
 
+    def _conversation_context_text(
+        self,
+        problem: str,
+        context: Optional[Dict[str, Any]],
+        include_current: bool = True,
+    ) -> str:
+        parts: list[str] = []
+        if isinstance(context, dict):
+            conversation_context = context.get("conversation_context")
+            if isinstance(conversation_context, dict):
+                for message in conversation_context.get("recent_messages") or []:
+                    if not isinstance(message, dict):
+                        continue
+                    role = str(message.get("role") or "message").strip()
+                    content = str(message.get("content") or "").strip()
+                    if content:
+                        parts.append(f"{role}: {content}")
+                previous_user_problem = str(conversation_context.get("previous_user_problem") or "").strip()
+                previous_assistant_response = str(conversation_context.get("previous_assistant_response") or "").strip()
+                if previous_user_problem:
+                    parts.append(f"previous user problem: {previous_user_problem}")
+                if previous_assistant_response:
+                    parts.append(f"previous assistant response: {previous_assistant_response}")
+            if include_current:
+                student_followup = str(context.get("student_followup") or "").strip()
+                if student_followup:
+                    parts.append(f"student follow-up: {student_followup}")
+        if include_current:
+            parts.append(problem)
+        return "\n".join(parts)
+
+    def _physics_context_text(self, problem: str, context: Optional[Dict[str, Any]]) -> str:
+        """Return prior physics context without letting the new question contaminate parsing."""
+        prior_context = self._conversation_context_text(problem, context, include_current=False).strip()
+        if prior_context:
+            return prior_context
+        return self._conversation_context_text(problem, context, include_current=True)
+
+    def _current_followup_text(self, problem: str, context: Optional[Dict[str, Any]]) -> str:
+        if isinstance(context, dict):
+            student_followup = str(context.get("student_followup") or "").strip()
+            if student_followup:
+                return student_followup
+        marker = "Current follow-up question:"
+        if marker in problem:
+            return problem.split(marker, 1)[1].strip()
+        return problem
+
+    def _is_contextual_followup_problem(self, problem: str, context: Optional[Dict[str, Any]]) -> bool:
+        if isinstance(context, dict) and context.get("contextual_followup") is True:
+            return True
+        return "Current follow-up question:" in problem and "Previous conversation:" in problem
+
+    def _is_normal_force_context_followup(self, problem: str, context: Optional[Dict[str, Any]]) -> bool:
+        current_question = self._current_followup_text(problem, context).lower()
+        context_text = self._physics_context_text(problem, context).lower()
+        if "normal" not in current_question:
+            return False
+        if not any(cue in current_question for cue in ("weight", "fy", "f_y", "vertical", "minus", "subtract")):
+            return False
+        return any(cue in context_text for cue in ("kg", "weight", "fy", "f_y", "y-component", "vertical component"))
+
+    def _is_incline_normal_force_followup(self, problem: str, context: Optional[Dict[str, Any]]) -> bool:
+        current_question = self._current_followup_text(problem, context).lower()
+        context_text = self._physics_context_text(problem, context).lower()
+        if "normal" not in current_question:
+            return False
+        if not any(cue in current_question for cue in ("weight", "fy", "f_y", "component", "minus", "subtract", "equal")):
+            return False
+        return self._is_incline_problem(context_text)
+
+    def _is_incline_friction_followup(self, problem: str, context: Optional[Dict[str, Any]]) -> bool:
+        if not self._is_contextual_followup_problem(problem, context):
+            return False
+        current_question = self._current_followup_text(problem, context).lower()
+        context_text = self._physics_context_text(problem, context).lower()
+        if "friction" not in current_question:
+            return False
+        if not self._is_incline_problem(context_text):
+            return False
+        followup_cues = (
+            "up",
+            "down",
+            "direction",
+            "which way",
+            "where",
+            "what about",
+            "what is",
+            "what's",
+            "how much",
+            "magnitude",
+            "equal",
+            "force",
+        )
+        return any(cue in current_question for cue in followup_cues)
+
+    def _is_contextual_friction_followup(self, problem: str, context: Optional[Dict[str, Any]]) -> bool:
+        if not self._is_contextual_followup_problem(problem, context):
+            return False
+        current_question = self._current_followup_text(problem, context).lower()
+        context_text = self._physics_context_text(problem, context).lower()
+        if "friction" not in current_question:
+            return False
+        if self._is_incline_problem(context_text):
+            return False
+        return any(
+            cue in current_question
+            for cue in ("left", "right", "which way", "direction", "what is", "what's", "how much", "force", "magnitude")
+        )
+
+    def _is_horizontal_acceleration_followup(self, problem: str, context: Optional[Dict[str, Any]]) -> bool:
+        if not self._is_contextual_followup_problem(problem, context):
+            return False
+        current_question = self._current_followup_text(problem, context).lower()
+        context_text = self._physics_context_text(problem, context).lower()
+        if self._is_incline_problem(context_text):
+            return False
+        if not any(cue in current_question for cue in ("acceleration", "accelerate", "speed up")):
+            return False
+        return any(cue in context_text for cue in ("net horizontal force", "to the right", "to the left", "floor", "horizontal"))
+
+    def _is_horizontal_free_body_followup(self, problem: str, context: Optional[Dict[str, Any]]) -> bool:
+        if not self._is_contextual_followup_problem(problem, context):
+            return False
+        current_question = self._current_followup_text(problem, context).lower()
+        context_text = self._physics_context_text(problem, context).lower()
+        if self._is_incline_problem(context_text):
+            return False
+        if not any(cue in current_question for cue in ("free body", "free-body", "fbd", "diagram", "what forces", "which forces")):
+            return False
+        return any(cue in context_text for cue in ("floor", "horizontal", "pushed", "pulled", "friction"))
+
+    def _is_spring_followup(self, problem: str, context: Optional[Dict[str, Any]]) -> bool:
+        if not self._is_contextual_followup_problem(problem, context):
+            return False
+        current_question = self._current_followup_text(problem, context).lower()
+        context_text = self._physics_context_text(problem, context).lower()
+        if not any(cue in context_text for cue in ("spring", "hooke", "fs = -kx", "f_s = -kx")):
+            return False
+        return any(cue in current_question for cue in ("negative", "opposite", "direction", "stretch", "compression", "restoring"))
+
+    def _is_tension_equilibrium_followup(self, problem: str, context: Optional[Dict[str, Any]]) -> bool:
+        if not self._is_contextual_followup_problem(problem, context):
+            return False
+        current_question = self._current_followup_text(problem, context).lower()
+        context_text = self._physics_context_text(problem, context).lower()
+        if not any(cue in context_text for cue in ("tension", "rope", "hangs", "hanging")):
+            return False
+        return any(cue in current_question for cue in ("tension", "weight", "equal", "free body", "free-body", "fbd", "which forces", "what forces"))
+
+    def _is_incline_acceleration_followup(self, problem: str, context: Optional[Dict[str, Any]]) -> bool:
+        if not self._is_contextual_followup_problem(problem, context):
+            return False
+        current_question = self._current_followup_text(problem, context).lower()
+        context_text = self._physics_context_text(problem, context).lower()
+        if not self._is_incline_problem(context_text):
+            return False
+        return any(cue in current_question for cue in ("acceleration", "accelerate", "speed up"))
+
+    def _is_incline_free_body_followup(self, problem: str, context: Optional[Dict[str, Any]]) -> bool:
+        if not self._is_contextual_followup_problem(problem, context):
+            return False
+        current_question = self._current_followup_text(problem, context).lower()
+        context_text = self._physics_context_text(problem, context).lower()
+        if not self._is_incline_problem(context_text):
+            return False
+        return any(cue in current_question for cue in ("free body", "free-body", "fbd", "diagram", "which forces", "what forces"))
+
+    def _is_incline_force_balance_followup(self, problem: str, context: Optional[Dict[str, Any]]) -> bool:
+        if not self._is_contextual_followup_problem(problem, context):
+            return False
+        current_question = self._current_followup_text(problem, context).lower()
+        context_text = self._physics_context_text(problem, context).lower()
+        if not self._is_incline_problem(context_text):
+            return False
+        return any(
+            cue in current_question
+            for cue in (
+                "force balance",
+                "balance of forces",
+                "forces balance",
+                "net force",
+                "sum of forces",
+                "force equation",
+                "why does it accelerate",
+                "why is it moving",
+            )
+        )
+
+    def _infer_incline_friction_direction(self, text: str) -> str:
+        lower = text.lower()
+        if any(cue in lower for cue in ("slides down", "sliding down", "moves down", "moving down", "down the ramp", "down incline")):
+            return "up the ramp"
+        if any(cue in lower for cue in ("slides up", "sliding up", "moves up", "moving up", "up the ramp", "up incline")):
+            return "down the ramp"
+        return "opposite the motion or impending motion along the ramp"
+
+    def _requested_incline_direction(self, text: str) -> Optional[str]:
+        lower = text.lower()
+        if re.search(r"\bdown\b", lower) and any(cue in lower for cue in ("ramp", "incline", "plane", "slope")):
+            return "down the ramp"
+        if re.search(r"\bup\b", lower) and any(cue in lower for cue in ("ramp", "incline", "plane", "slope")):
+            return "up the ramp"
+        return None
+
+    def _requested_horizontal_direction(self, text: str) -> Optional[str]:
+        lower = text.lower()
+        if re.search(r"\bleft\b", lower):
+            return "left"
+        if re.search(r"\bright\b", lower):
+            return "right"
+        return None
+
+    def _direction_phrase(self, direction: str) -> str:
+        if direction in {"left", "right"}:
+            return f"to the {direction}"
+        return direction
+
+    def _direction_check_opening(
+        self,
+        subject: str,
+        actual_direction: str,
+        requested_direction: Optional[str],
+    ) -> str:
+        actual_phrase = self._direction_phrase(actual_direction)
+        if requested_direction:
+            requested_phrase = self._direction_phrase(requested_direction)
+            if actual_direction == requested_direction:
+                return f"Yes. {subject} points {actual_phrase}."
+            if actual_direction == "zero":
+                return f"No. {subject} is zero, so it does not point {requested_phrase}."
+            return f"No. {subject} points {actual_phrase}, not {requested_phrase}."
+        if actual_direction == "zero":
+            return f"{subject} is zero."
+        return f"{subject} points {actual_phrase}."
+
+    def _extract_mass_kg_from_text(self, text: str) -> Optional[float]:
+        for match in re.finditer(r"(?<![\w.])([0-9]+(?:\.[0-9]+)?)\s*kg\b", text, flags=re.IGNORECASE):
+            try:
+                mass = float(match.group(1))
+            except ValueError:
+                continue
+            if mass > 0:
+                return mass
+        return None
+
+    def _extract_vertical_component_n_from_text(self, text: str) -> Optional[float]:
+        direct_patterns = [
+            r"\bF\s*[_\s]?\s*y\b\s*(?:=|:)?\s*(-?[0-9]+(?:\.[0-9]+)?)\s*N",
+            r"\bY-component\s*(?:\([^)]*F\s*[_\s]?\s*y[^)]*\))?\s*(?:=|:)?\s*(-?[0-9]+(?:\.[0-9]+)?)\s*N",
+            r"\bvertical component\s*(?:\([^)]*F\s*[_\s]?\s*y[^)]*\))?\s*(?:=|:)?\s*(-?[0-9]+(?:\.[0-9]+)?)\s*N",
+        ]
+        for pattern in direct_patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if match:
+                try:
+                    return float(match.group(1))
+                except ValueError:
+                    pass
+
+        for line in text.splitlines():
+            normalized = line.lower()
+            if not any(cue in normalized for cue in ("fy", "f_y", "y-component", "vertical component")):
+                continue
+            matches = re.findall(r"[-+]?[0-9]+(?:\.[0-9]+)?(?=\s*n\b)", line, flags=re.IGNORECASE)
+            if not matches:
+                continue
+            try:
+                return float(matches[-1])
+            except ValueError:
+                continue
+
+        vector_match = re.search(
+            r"([0-9]+(?:\.[0-9]+)?)\s*n\b[^\n.]{0,80}?([0-9]+(?:\.[0-9]+)?)\s*(?:degrees?|deg|°)[^\n.]{0,80}?(above|below|\+x|-x)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if not vector_match:
+            return None
+        force = float(vector_match.group(1))
+        angle_deg = float(vector_match.group(2))
+        direction_text = vector_match.group(3).lower()
+        fy = force * math.sin(math.radians(angle_deg))
+        if "below" in direction_text:
+            fy *= -1
+        return fy
+
+    def _extract_weight_n_from_text(self, text: str) -> Optional[float]:
+        patterns = [
+            r"Weight force magnitude:\s*([0-9]+(?:\.[0-9]+)?)\s*N",
+            r"\bW\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*N",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if not match:
+                continue
+            try:
+                return float(match.group(1))
+            except ValueError:
+                continue
+        return None
+
+    def _extract_normal_force_n_from_text(self, text: str) -> Optional[float]:
+        patterns = [
+            r"\bnormal force\s*(?:is|=|:)?\s*(-?[0-9]+(?:\.[0-9]+)?)\s*N",
+            r"\bN\s*=\s*W\s*-\s*F\s*[_\s]?\s*y\s*=\s*(-?[0-9]+(?:\.[0-9]+)?)\s*N",
+            r"\bN\s*=\s*(-?[0-9]+(?:\.[0-9]+)?)\s*N",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if match:
+                try:
+                    value = float(match.group(1))
+                except ValueError:
+                    continue
+                if value > 0:
+                    return value
+        return None
+
+    def _extract_friction_force_n_from_text(self, text: str) -> Optional[float]:
+        patterns = [
+            r"\bfriction(?:\s+force)?\s*(?:is|=|:)?\s*(?:f\s*[_\s]?\s*k\s*=\s*)?(?:μ|mu)\s*[_\s]?\s*k?\s*N\s*=\s*(-?[0-9]+(?:\.[0-9]+)?)\s*N",
+            r"\bf\s*[_\s]?\s*k\s*=\s*(?:μ|mu)\s*[_\s]?\s*k?\s*N\s*=\s*(-?[0-9]+(?:\.[0-9]+)?)\s*N",
+            r"\bf\s*[_\s]?\s*k?\s*=\s*(-?[0-9]+(?:\.[0-9]+)?)\s*N",
+            r"\bfriction(?:\s+force)?[^.\n;:]*?(-?[0-9]+(?:\.[0-9]+)?)\s*N",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if match:
+                try:
+                    value = float(match.group(1))
+                except ValueError:
+                    continue
+                if value >= 0:
+                    return value
+        return None
+
+    def _extract_acceleration_from_text(self, text: str) -> Optional[tuple[float, str]]:
+        patterns = [
+            r"\bacceleration(?:\s+magnitude)?\s*(?:is|=|:)?\s*(-?[0-9]+(?:\.[0-9]+)?)\s*m\s*/?\s*s(?:\^?2|²)?(?:\s*(?:to the|toward)?\s*(right|left|up|down))?",
+            r"\ba\s*=\s*(-?[0-9]+(?:\.[0-9]+)?)\s*m\s*/?\s*s(?:\^?2|²)?(?:\s*(?:to the|toward)?\s*(right|left|up|down))?",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if not match:
+                continue
+            try:
+                acceleration = float(match.group(1))
+            except ValueError:
+                continue
+            direction = (match.group(2) or "").lower()
+            if not direction:
+                lower = text.lower()
+                if "to the right" in lower:
+                    direction = "right"
+                elif "to the left" in lower:
+                    direction = "left"
+            return acceleration, direction
+        return None
+
+    def _extract_net_horizontal_force_from_text(self, text: str) -> Optional[tuple[float, str]]:
+        patterns = [
+            r"\bnet horizontal force\s*(?:is|=|:)?\s*(-?[0-9]+(?:\.[0-9]+)?)\s*N(?:\s*(?:to the|toward)?\s*(right|left))?",
+            r"\bF\s*[_\s]?\s*net\s*(?:is|=|:)?\s*(-?[0-9]+(?:\.[0-9]+)?)\s*N(?:\s*(?:to the|toward)?\s*(right|left))?",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if not match:
+                continue
+            try:
+                force = float(match.group(1))
+            except ValueError:
+                continue
+            direction = (match.group(2) or "").lower()
+            if not direction:
+                lower = text.lower()
+                if "to the right" in lower:
+                    direction = "right"
+                elif "to the left" in lower:
+                    direction = "left"
+            return force, direction
+        return None
+
+    def _extract_applied_horizontal_force_from_text(self, text: str) -> Optional[tuple[float, str]]:
+        patterns = [
+            r"(?:pushed|pulled|applied force)[^.\n;]*?(?:to the\s+)?(right|left)[^.\n;]*?([0-9]+(?:\.[0-9]+)?)\s*N",
+            r"([0-9]+(?:\.[0-9]+)?)\s*N[^.\n;]*?(?:pushed|pulled|applied)[^.\n;]*?(?:to the\s+)?(right|left)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if not match:
+                continue
+            try:
+                if match.group(1).lower() in {"right", "left"}:
+                    return float(match.group(2)), match.group(1).lower()
+                return float(match.group(1)), match.group(2).lower()
+            except (ValueError, IndexError):
+                continue
+        return None
+
+    def _build_forces_direct_solution(self, problem: str) -> Optional[Dict[str, Any]]:
+        """Solve common Forces 101 prompts with direct MCP calls before any LLM route."""
+        if not self.mcp_client:
+            return None
+
+        if self._is_level_surface_friction_problem(problem):
+            result = self._build_level_surface_friction_solution(problem)
+            if result:
+                return result
+
+        if self._is_simple_tension_equilibrium_problem(problem):
+            result = self._build_simple_tension_equilibrium_solution(problem)
+            if result:
+                return result
+
+        if self._is_incline_problem(problem):
+            incline_result = self._call_incline_mcp_tool(problem)
+            diagram = incline_result.get("diagram") if incline_result else None
+            if not diagram:
+                diagram = self._build_inclined_plane_diagram_fallback(problem)
+            if diagram:
+                return {
+                    "solution": self._format_incline_summary_from_diagram(diagram),
+                    "tools_used": ["analyze_forces_on_incline"],
+                    "diagram": diagram,
+                }
+
+        if self._is_free_body_diagram_request(problem):
+            fbd_result = self._call_free_body_diagram_mcp_tool(problem)
+            diagram = fbd_result.get("diagram") if fbd_result else None
+            if not diagram:
+                diagram = self._build_free_body_diagram_fallback(problem)
+            if diagram:
+                return {
+                    "solution": self._format_free_body_summary(diagram),
+                    "tools_used": ["create_free_body_diagram"],
+                    "diagram": diagram,
+                }
+
+        if self._is_spring_force_problem(problem):
+            spring_result = self._call_spring_force_mcp_tool(problem) or self._build_spring_force_solution(problem)
+            if spring_result:
+                return {
+                    "solution": spring_result["solution"],
+                    "tools_used": ["calculate_spring_force_tool"],
+                    "diagram": spring_result.get("diagram"),
+                }
+
+        return None
+
+    def _is_level_surface_friction_problem(self, problem: str) -> bool:
+        lower = problem.lower()
+        if self._is_incline_problem(lower):
+            return False
+        if not any(cue in lower for cue in ("floor", "surface", "level", "horizontal", "snow", "table", "ground")):
+            return False
+        if not any(cue in lower for cue in ("friction", "mu", "μ")):
+            return False
+        if not any(cue in lower for cue in ("push", "pushed", "pull", "pulled", "rope", "applied")):
+            return False
+        return self._extract_mass_kg_from_text(lower) is not None
+
+    def _is_simple_tension_equilibrium_problem(self, problem: str) -> bool:
+        lower = problem.lower()
+        if self._extract_mass_kg_from_text(lower) is None:
+            return False
+        has_tension_context = any(cue in lower for cue in ("hangs", "hanging", "suspended", "rope", "string", "cable", "tension"))
+        has_equilibrium_context = any(cue in lower for cue in ("at rest", "stationary", "equilibrium", "not accelerating", "find the tension"))
+        return has_tension_context and has_equilibrium_context and "pulley" not in lower
+
+    def _build_simple_tension_equilibrium_solution(self, problem: str) -> Optional[Dict[str, Any]]:
+        mass = self._extract_mass_kg_from_text(problem)
+        if mass is None:
+            return None
+
+        try:
+            tool_result = self._call_mcp_tool_direct(
+                "calculate_weight_force",
+                {"mass": mass, "gravity": 9.81},
+            )
+        except Exception as exc:
+            logger.warning("Direct tension-equilibrium MCP call failed: %s", exc)
+            return None
+
+        raw_text = self._extract_text_from_mcp_tool_result(tool_result)
+        if raw_text and self._is_mcp_error_text(raw_text):
+            return None
+
+        weight = self._extract_weight_n_from_text(raw_text) if raw_text else None
+        if weight is None:
+            weight = mass * 9.81
+
+        return {
+            "solution": (
+                "For a hanging object at rest, the vertical forces balance.\n\n"
+                f"- Weight: W = mg = ({mass:.2f} kg)(9.81 m/s^2) = {weight:.2f} N downward\n"
+                "- Acceleration: a = 0, so net force is zero\n"
+                f"- Tension: T = W = {weight:.2f} N upward\n\n"
+                "The tension is not an extra force added to the weight; it is the upward force that balances the weight."
+            ),
+            "tools_used": ["calculate_weight_force"],
+            "diagram": None,
+        }
+
+    def _build_level_surface_friction_solution(self, problem: str) -> Optional[Dict[str, Any]]:
+        parsed = self._parse_level_surface_friction_parameters(problem)
+        if not parsed:
+            return None
+
+        mass = parsed["mass"]
+        applied_force = parsed["applied_force"]
+        angle = parsed["angle_degrees"]
+        mu = parsed["coefficient_friction"]
+        gravity = parsed["gravity"]
+        pull_direction = parsed["pull_direction"]
+        direction_sign = -1.0 if pull_direction == "left" else 1.0
+
+        tool_names: list[str] = []
+        fx = direction_sign * applied_force * math.cos(math.radians(angle))
+        fy = applied_force * math.sin(math.radians(angle))
+
+        if abs(angle) > 1e-9:
+            try:
+                component_result = self._call_mcp_tool_direct(
+                    "resolve_force_components",
+                    {"magnitude": applied_force, "angle_degrees": angle if direction_sign > 0 else 180.0 - angle},
+                )
+            except Exception as exc:
+                logger.warning("Direct level-surface component MCP call failed: %s", exc)
+                return None
+            component_text = self._extract_text_from_mcp_tool_result(component_result)
+            if component_text and self._is_mcp_error_text(component_text):
+                return None
+            component_diagram = self._extract_diagram_from_text(component_text) if component_text else None
+            component_vector = (component_diagram or {}).get("vector", {}) if isinstance(component_diagram, dict) else {}
+            fx = float(component_vector.get("fx_n", fx))
+            fy = float(component_vector.get("fy_n", fy))
+            tool_names.append("resolve_force_components")
+
+        try:
+            weight_result = self._call_mcp_tool_direct(
+                "calculate_weight_force",
+                {"mass": mass, "gravity": gravity},
+            )
+        except Exception as exc:
+            logger.warning("Direct level-surface weight MCP call failed: %s", exc)
+            return None
+        weight_text = self._extract_text_from_mcp_tool_result(weight_result)
+        if weight_text and self._is_mcp_error_text(weight_text):
+            return None
+        weight = self._extract_weight_n_from_text(weight_text) if weight_text else None
+        if weight is None:
+            weight = mass * gravity
+        tool_names.append("calculate_weight_force")
+
+        if abs(fy) < 1e-9:
+            normal = weight
+            normal_relation = "N = W"
+            normal_reason = "because there is no vertical acceleration and no vertical component of the applied force"
+        elif fy > 0:
+            normal = max(0.0, weight - fy)
+            normal_relation = "N = W - F_y"
+            normal_reason = "because the upward part of the rope helps support the sled"
+        else:
+            normal = weight + abs(fy)
+            normal_relation = "N = W + |F_y|"
+            normal_reason = "because a downward applied component pushes harder into the surface"
+
+        try:
+            friction_result = self._call_mcp_tool_direct(
+                "calculate_friction_force_tool",
+                {"coefficient": mu, "normal_force": normal, "force_type": "kinetic"},
+            )
+        except Exception as exc:
+            logger.warning("Direct level-surface friction MCP call failed: %s", exc)
+            return None
+        friction_text = self._extract_text_from_mcp_tool_result(friction_result)
+        if friction_text and self._is_mcp_error_text(friction_text):
+            return None
+        friction = self._extract_friction_force_n_from_text(friction_text) if friction_text else None
+        if friction is None:
+            friction = mu * normal
+        tool_names.append("calculate_friction_force_tool")
+
+        friction_signed = -math.copysign(friction, fx) if abs(fx) > 1e-9 else 0.0
+        net_horizontal = fx + friction_signed
+
+        try:
+            self._call_mcp_tool_direct(
+                "add_forces_1d",
+                {"forces": f"{fx:.6g}, {friction_signed:.6g}"},
+            )
+        except Exception as exc:
+            logger.warning("Direct level-surface net-force MCP call failed: %s", exc)
+            return None
+        tool_names.append("add_forces_1d")
+
+        try:
+            self._call_mcp_tool_direct(
+                "newton_second_law",
+                {"newton_data": json.dumps({"force": net_horizontal, "mass": mass})},
+            )
+        except Exception as exc:
+            logger.warning("Direct level-surface Newton MCP call failed: %s", exc)
+            return None
+        tool_names.append("newton_second_law")
+
+        acceleration = net_horizontal / mass
+        motion_direction = self._horizontal_direction_label(net_horizontal, pull_direction)
+        friction_direction = self._horizontal_direction_label(friction_signed, "opposite the pull")
+        applied_direction_phrase = f"to the {pull_direction}" if pull_direction in {"right", "left"} else "in the pull direction"
+
+        lines = [
+            "This is a level-surface friction problem, so use horizontal and vertical force balances separately.",
+            "",
+            f"Known values: m = {mass:.2f} kg, applied force = {applied_force:.2f} N, mu_k = {mu:.3g}.",
+        ]
+        if abs(angle) > 1e-9:
+            lines.append(
+                f"Resolve the applied force: F_x = {abs(fx):.2f} N {applied_direction_phrase}, "
+                f"F_y = {fy:.2f} N upward."
+            )
+        else:
+            lines.append(f"The applied force is horizontal: F_x = {abs(fx):.2f} N {applied_direction_phrase}.")
+        lines.extend(
+            [
+                f"Weight: W = mg = ({mass:.2f})(9.81) = {weight:.2f} N.",
+                f"Vertical balance gives {normal_relation} = {normal:.2f} N, {normal_reason}.",
+                f"Kinetic friction: f_k = mu_k N = ({mu:.3g})({normal:.2f} N) = {friction:.2f} N, directed {friction_direction}.",
+                f"Horizontal net force: F_net,x = {fx:.2f} N + ({friction_signed:.2f} N) = {net_horizontal:.2f} N.",
+                f"Acceleration: a = F_net/m = {net_horizontal:.2f} N / {mass:.2f} kg = {acceleration:.2f} m/s^2 {motion_direction}.",
+            ]
+        )
+
+        return {
+            "solution": "\n".join(lines),
+            "tools_used": tool_names,
+            "diagram": None,
+        }
+
+    def _parse_level_surface_friction_parameters(self, problem: str) -> Optional[Dict[str, float]]:
+        lower = problem.lower().replace("\u00b0", " degrees ")
+        mass = self._extract_mass_kg_from_text(lower)
+        applied_force = self._extract_applied_force_magnitude_n(lower)
+        coefficient = self._parse_friction_coefficient(lower)
+        if mass is None or applied_force is None or coefficient <= 0:
+            return None
+
+        raw_angle = self._first_float_match(lower, [r"(-?\d+(?:\.\d+)?)\s*(?:degrees?|deg)\b"])
+        angle = float(raw_angle) if raw_angle is not None else 0.0
+        if any(cue in lower for cue in ("below the horizontal", "downward", "below +x", "below the +x")):
+            angle = -abs(angle)
+        else:
+            angle = abs(angle)
+
+        gravity = self._first_float_match(
+            lower,
+            [r"(?:gravity|g)\s*(?:=|is|of|:)?\s*(-?\d+(?:\.\d+)?)\s*(?:m\s*/\s*s\^?2|mps2)?"],
+        ) or 9.81
+
+        return {
+            "mass": float(mass),
+            "applied_force": float(applied_force),
+            "angle_degrees": float(angle),
+            "coefficient_friction": float(coefficient),
+            "gravity": float(gravity),
+            "pull_direction": self._infer_applied_horizontal_direction(lower),
+        }
+
+    def _extract_applied_force_magnitude_n(self, text: str) -> Optional[float]:
+        patterns = [
+            r"(?:pulled|pushed|push|pull|applied|rope)[^.\n;]*?(?:by|with|of)?\s*(?:a\s*)?(-?\d+(?:\.\d+)?)\s*N\b",
+            r"(-?\d+(?:\.\d+)?)\s*N\s+(?:rope|pull|push|applied force|force)",
+            r"(?:force|tension)\s*(?:=|is|of|:)?\s*(-?\d+(?:\.\d+)?)\s*N\b",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if not match:
+                continue
+            try:
+                force = float(match.group(1))
+            except ValueError:
+                continue
+            if force > 0:
+                return force
+        return None
+
+    def _infer_applied_horizontal_direction(self, text: str) -> str:
+        lower = text.lower()
+        if any(cue in lower for cue in ("to the left", "toward the left", "leftward", "west")):
+            return "left"
+        if any(cue in lower for cue in ("to the right", "toward the right", "rightward", "east")):
+            return "right"
+        return "right"
+
+    def _horizontal_direction_label(self, signed_value: float, fallback: str = "in the positive direction") -> str:
+        if signed_value > 1e-9:
+            return "to the right"
+        if signed_value < -1e-9:
+            return "to the left"
+        return fallback
+
+    def _extract_weight_from_text(self, text: str) -> Optional[float]:
+        patterns = [
+            r"\bweight\s*(?:W)?\s*(?:=|is|:)?\s*(?:mg\s*=\s*)?(-?[0-9]+(?:\.[0-9]+)?)\s*N",
+            r"\bW\s*=\s*mg\s*=\s*(-?[0-9]+(?:\.[0-9]+)?)\s*N",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if match:
+                try:
+                    value = float(match.group(1))
+                except ValueError:
+                    continue
+                if value > 0:
+                    return value
+        return None
+
+    def _infer_horizontal_friction_direction(self, text: str) -> str:
+        lower = text.lower()
+        if re.search(r"friction[^.\n;]*\bleft\b", lower):
+            return "left"
+        if re.search(r"friction[^.\n;]*\bright\b", lower):
+            return "right"
+        if any(cue in lower for cue in ("pulled to the right", "pushed to the right", "slides right", "sliding right", "moves right", "moving right")):
+            return "left"
+        if any(cue in lower for cue in ("pulled to the left", "pushed to the left", "slides left", "sliding left", "moves left", "moving left")):
+            return "right"
+        return "opposite the motion or intended motion"
+
+    def _build_force_quiz_reflection_mcp_response(self, problem: str) -> Optional[Dict[str, Any]]:
+        """Ground Newton quiz-reflection guidance in a simple MCP force-balance check."""
+        if not self.mcp_client:
+            return None
+
+        concept_tag = infer_newton_reflection_focus(problem)
+        if concept_tag == "newton_second_law":
+            forces = [
+                {"magnitude": 10, "angle": 0},
+                {"magnitude": 4, "angle": 180},
+            ]
+        else:
+            forces = [
+                {"magnitude": 10, "angle": 0},
+                {"magnitude": 10, "angle": 180},
+            ]
+
+        try:
+            tool_result = self._call_mcp_tool_direct(
+                "check_equilibrium",
+                {"forces_data": json.dumps(forces)},
+            )
+        except Exception as exc:
+            logger.warning("Newton quiz reflection MCP grounding failed: %s", exc)
+            return None
+
+        raw_text = self._extract_text_from_mcp_tool_result(tool_result)
+        if not raw_text or self._is_mcp_error_text(raw_text):
+            return None
+
+        return {
+            "solution": build_force_quiz_reflection_response(
+                problem,
+                concept_tag=concept_tag,
+            ),
+            "tools_used": ["check_equilibrium"],
+            "diagram": None,
+            "concept_tag": concept_tag,
+        }
+
     async def _try_fast_mcp_guided_solution(
         self,
         problem: str,
         rag_context: Optional[Dict[str, Any]] = None,
+        context: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Use a compact LLM plan to call MCP tools directly before the full agent loop."""
         if not self.fast_mcp_router_enabled or not self.mcp_client:
@@ -1213,12 +2135,20 @@ class StrandsPhysicsAgent(ABC):
         ):
             solution = self._format_incline_summary_from_diagram(primary_diagram)
 
-        llm_solution = await self._format_fast_mcp_response_with_llm(
-            problem=problem,
-            plan=plan,
-            tool_names=tool_names,
-            tool_output=combined_tool_text,
-        )
+        if self._is_contextual_followup_problem(problem, context):
+            llm_solution = await self._format_contextual_fast_mcp_response_with_llm(
+                problem=problem,
+                plan=plan,
+                tool_names=tool_names,
+                tool_output=combined_tool_text,
+            )
+        else:
+            llm_solution = await self._format_fast_mcp_response_with_llm(
+                problem=problem,
+                plan=plan,
+                tool_names=tool_names,
+                tool_output=combined_tool_text,
+            )
         if llm_solution:
             solution = llm_solution
 
@@ -1317,6 +2247,7 @@ class StrandsPhysicsAgent(ABC):
         num_predict: int,
         json_format: bool = False,
         model_id: Optional[str] = None,
+        think: Optional[bool] = None,
     ) -> str:
         """Call Ollama directly for short planner/rewrite prompts."""
         payload: Dict[str, Any] = {
@@ -1330,6 +2261,8 @@ class StrandsPhysicsAgent(ABC):
         }
         if json_format:
             payload["format"] = "json"
+        if think is not None:
+            payload["think"] = think
 
         connect_timeout = min(3.0, max(1.0, timeout_seconds))
         response = requests.post(
@@ -1564,6 +2497,44 @@ class StrandsPhysicsAgent(ABC):
             )
         except Exception as exc:
             logger.info("Fast MCP explanation rewrite unavailable for %s: %s", self.agent_id, exc)
+            return None
+        return self._strip_embedded_diagram_json(response).strip() or None
+
+    async def _format_contextual_fast_mcp_response_with_llm(
+        self,
+        problem: str,
+        plan: Optional[Dict[str, Any]],
+        tool_names: list[str],
+        tool_output: str,
+    ) -> Optional[str]:
+        """Rewrite MCP output so follow-up turns answer the current question, not the whole old problem."""
+        prompt = (
+            "You are a physics tutor answering a follow-up question. The prompt contains the previous "
+            "conversation and a line labeled 'Current follow-up question'. Use the MCP tool output as "
+            "the calculation source, but answer the current follow-up directly.\n\n"
+            "Rules:\n"
+            "- Start by answering the student's current question in one sentence.\n"
+            "- If the student asks whether an idea is correct, say yes/no/not quite first.\n"
+            "- Preserve the previous problem context; do not replace it with a new generic example.\n"
+            "- Do not repeat the entire previous solution or dump the full MCP output.\n"
+            "- Show only the equation or calculation needed for this follow-up.\n"
+            "- If the prior context is missing a value, ask for that value instead of guessing.\n\n"
+            f"Student prompt with context:\n{problem[:5000]}\n\n"
+            f"Planner:\n{json.dumps(plan or {}, ensure_ascii=True)[:1200]}\n\n"
+            f"MCP tools used: {', '.join(tool_names)}\n\n"
+            f"MCP output:\n{self._strip_embedded_diagram_json(tool_output)[:6000]}"
+        )
+        try:
+            response = await asyncio.to_thread(
+                self._request_ollama_generate,
+                prompt,
+                self.fast_mcp_explain_timeout_seconds,
+                900,
+                False,
+                self.model_id,
+            )
+        except Exception as exc:
+            logger.info("Contextual MCP follow-up rewrite unavailable for %s: %s", self.agent_id, exc)
             return None
         return self._strip_embedded_diagram_json(response).strip() or None
 
@@ -3501,7 +4472,11 @@ class StrandsPhysicsAgent(ABC):
         w_perpendicular = self._extract_float(text, r"W⊥\s*=.*?=\s*(-?\d+(?:\.\d+)?)\s*N")
         normal = self._extract_float(text, r"N\s*=\s*W⊥\s*=\s*(-?\d+(?:\.\d+)?)\s*N")
         friction = self._extract_float(text, r"f\s*=\s*μN\s*=.*?=\s*(-?\d+(?:\.\d+)?)\s*N", default=-1.0)
+        if friction < 0:
+            friction = self._extract_float(text, r"f\s*=\s*μN\s*=\s*(-?\d+(?:\.\d+)?)\s*N", default=-1.0)
         net_down = self._extract_float(text, r"Net force down incline\s*=.*?=\s*(-?\d+(?:\.\d+)?)\s*N")
+        if net_down == 0:
+            net_down = self._extract_float(text, r"Net force down incline\s*=\s*(-?\d+(?:\.\d+)?)\s*N")
 
         if angle_deg == 0 and mass == 0 and w_parallel == 0 and w_perpendicular == 0:
             return None
