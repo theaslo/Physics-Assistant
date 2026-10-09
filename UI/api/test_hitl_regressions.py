@@ -428,6 +428,178 @@ class HitlApiRouteRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(response.metadata["quiz_reflection_mode"]["enabled"])
         self.assertEqual(response.metadata["quiz_reflection_mode"]["concept_tag"], "newton_second_law")
 
+    async def test_contextual_forces_followup_skips_generic_hitl_and_keeps_history(self):
+        seen: Dict[str, Any] = {}
+
+        class FailGate:
+            def is_enabled_for(self, agent_id: str) -> bool:
+                return True
+
+            async def maybe_create_check_with_trace(self, **kwargs: Any):
+                raise AssertionError("Contextual follow-up should skip the generic HITL question")
+
+        class StubAgent:
+            async def solve_problem(
+                self,
+                problem: str,
+                context: Optional[Dict[str, Any]],
+                user_id: Optional[str],
+                session_id: Optional[str],
+            ) -> Dict[str, Any]:
+                seen["problem"] = problem
+                seen["context"] = context
+                return {
+                    "success": True,
+                    "agent_id": "forces_agent",
+                    "problem": problem,
+                    "solution": "Yes. For the original problem, N = W - F_y.",
+                    "tools_used": ["calculate_weight_force"],
+                    "metadata": {"contextual_followup": True},
+                }
+
+        async def fake_get_or_create_agent(*args: Any, **kwargs: Any):
+            return StubAgent()
+
+        self.api_main.knowledge_transfer_gate = FailGate()
+        self.api_main.get_or_create_agent = fake_get_or_create_agent
+
+        response = await self.api_main.solve_problem(
+            "forces_agent",
+            self.api_main.ProblemSolveRequest(
+                problem="Is the normal force equal to the weight minus Fy?",
+                user_id="student-a",
+                context={
+                    "conversation_context": {
+                        "recent_messages": [
+                            {
+                                "role": "user",
+                                "content": "A 12 kg box is pulled with a 40 N force at 25 degrees above the +x axis.",
+                            },
+                            {
+                                "role": "assistant",
+                                "content": "Mass (m): 12.00 kg\nY-component (Fy): 16.90 N upward",
+                            },
+                        ],
+                    }
+                },
+            ),
+        )
+
+        self.assertTrue(response.success)
+        self.assertIsNone(response.hitl)
+        self.assertEqual(response.tools_used, ["calculate_weight_force"])
+        self.assertIn("Previous conversation:", seen["problem"])
+        self.assertIn("12 kg box", seen["problem"])
+        self.assertIn("Current follow-up question:", seen["problem"])
+        self.assertTrue(seen["context"]["contextual_followup"])
+        self.assertEqual(seen["context"]["student_followup"], "Is the normal force equal to the weight minus Fy?")
+
+    async def test_short_forces_followup_skips_generic_hitl_even_without_symbol_reference(self):
+        seen: Dict[str, Any] = {}
+
+        class FailGate:
+            def is_enabled_for(self, agent_id: str) -> bool:
+                return True
+
+            async def maybe_create_check_with_trace(self, **kwargs: Any):
+                raise AssertionError("Short forces follow-ups should skip the generic HITL question")
+
+        class StubAgent:
+            async def solve_problem(
+                self,
+                problem: str,
+                context: Optional[Dict[str, Any]],
+                user_id: Optional[str],
+                session_id: Optional[str],
+            ) -> Dict[str, Any]:
+                seen["problem"] = problem
+                seen["context"] = context
+                return {
+                    "success": True,
+                    "agent_id": "forces_agent",
+                    "problem": problem,
+                    "solution": "Friction points up the ramp and has magnitude f_k = mu_k N.",
+                    "tools_used": ["analyze_forces_on_incline"],
+                    "metadata": {"contextual_followup": True},
+                }
+
+        async def fake_get_or_create_agent(*args: Any, **kwargs: Any):
+            return StubAgent()
+
+        self.api_main.knowledge_transfer_gate = FailGate()
+        self.api_main.get_or_create_agent = fake_get_or_create_agent
+
+        response = await self.api_main.solve_problem(
+            "forces_agent",
+            self.api_main.ProblemSolveRequest(
+                problem="What about friction?",
+                user_id="student-a",
+                context={
+                    "conversation_context": {
+                        "recent_messages": [
+                            {
+                                "role": "user",
+                                "content": (
+                                    "A 5.0 kg box slides down a 30 degree incline with coefficient of kinetic friction "
+                                    "mu_k = 0.30. Draw the free-body diagram and find the acceleration down the ramp."
+                                ),
+                            },
+                            {
+                                "role": "assistant",
+                                "content": "Normal force: 42.48 N. Acceleration magnitude: 2.36 m/s^2.",
+                            },
+                        ],
+                    }
+                },
+            ),
+        )
+
+        self.assertTrue(response.success)
+        self.assertIsNone(response.hitl)
+        self.assertIn("Current follow-up question:", seen["problem"])
+        self.assertTrue(seen["context"]["contextual_followup"])
+        self.assertEqual(seen["context"]["student_followup"], "What about friction?")
+
+    async def test_forces_topic_changes_keep_current_question_distinct_from_history(self):
+        seen = []
+
+        class FailGate:
+            def is_enabled_for(self, agent_id):
+                raise AssertionError("Conversation turns are handled by the tutor")
+
+        class StubAgent:
+            async def solve_problem(self, problem, context, **kwargs):
+                seen.append((problem, context))
+                return {"success": True, "agent_id": "forces_agent", "problem": problem,
+                        "solution": "Answer to the current question.", "tools_used": ["get_force_principles"]}
+
+        async def get_agent(*args, **kwargs):
+            return StubAgent()
+
+        self.api_main.knowledge_transfer_gate = FailGate()
+        self.api_main.get_or_create_agent = get_agent
+        history = {"recent_messages": [
+            {"role": "user", "content": "A spring has k = 50 N/m and stretches 0.20 m."},
+            {"role": "assistant", "content": "Its restoring force opposes the stretch."},
+        ]}
+        for question in (
+            "on an inclide sliding box, which was would be the friction?",
+            "A new mass hangs from a rope in an accelerating elevator. Compare tension and weight.",
+            "Now double the spring extension",
+            "What if it were compressed?",
+        ):
+            with self.subTest(question=question):
+                response = await self.api_main.solve_problem("forces_agent", self.api_main.ProblemSolveRequest(
+                    problem=question, context={"conversation_context": history}, user_id="student-a"))
+                self.assertTrue(response.success)
+                self.assertIsNone(response.hitl)
+                prompt, context = seen[-1]
+                self.assertEqual(context["student_followup"], question)
+                self.assertTrue(context["contextual_followup"])
+                self.assertIn("changes, or returns", prompt)
+                self.assertTrue(prompt.endswith(question))
+                self.assertNotIn("Preserve the earlier problem context", prompt)
+
     async def test_remediation_next_step_followup_returns_scaffold_without_solver(self):
         async def fail_get_or_create_agent(*args: Any, **kwargs: Any):
             raise AssertionError("solver should not be created for HITL remediation follow-ups")

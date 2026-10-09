@@ -291,6 +291,159 @@ def _log_slow_trace(agent_id: str, user_id: Optional[str], performance_trace: Di
     )
 
 
+def _extract_conversation_context(context: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(context, dict):
+        return None
+    raw_context = context.get("conversation_context")
+    if not isinstance(raw_context, dict):
+        return None
+    raw_messages = raw_context.get("recent_messages")
+    if not isinstance(raw_messages, list) or not raw_messages:
+        return None
+
+    recent_messages: list[Dict[str, str]] = []
+    for raw_message in raw_messages[-6:]:
+        if not isinstance(raw_message, dict):
+            continue
+        role = str(raw_message.get("role") or "").strip().lower()
+        content = str(raw_message.get("content") or "").strip()
+        if role not in {"user", "assistant"} or not content:
+            continue
+        recent_messages.append(
+            {
+                "role": role,
+                "content": content[:2000],
+            }
+        )
+
+    if not recent_messages:
+        return None
+
+    return {
+        "recent_messages": recent_messages,
+        "previous_user_problem": str(raw_context.get("previous_user_problem") or "").strip()[:2000],
+        "previous_assistant_response": str(raw_context.get("previous_assistant_response") or "").strip()[:2000],
+    }
+
+
+def _format_conversation_context(conversation_context: Dict[str, Any]) -> str:
+    formatted_messages: list[str] = []
+    for message in conversation_context.get("recent_messages") or []:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "message").strip().title()
+        content = str(message.get("content") or "").strip()
+        if content:
+            formatted_messages.append(f"{role}: {content}")
+    return "\n".join(formatted_messages)
+
+
+def _is_contextual_followup(
+    agent_id: str,
+    problem: str,
+    conversation_context: Optional[Dict[str, Any]],
+) -> bool:
+    if not conversation_context:
+        return False
+
+    previous_text = _format_conversation_context(conversation_context).lower()
+    if not previous_text:
+        return False
+
+    normalized_problem = problem.strip().lower()
+    if not normalized_problem:
+        return False
+
+    if agent_id == "forces_agent":
+        # History is available, but only the model can decide whether it still applies.
+        return True
+
+    has_context_reference = bool(
+        re.search(
+            r"\b(this|that|it|its|above|previous|same|earlier|last|from before|you said|there|they|those|these)\b",
+            normalized_problem,
+        )
+    )
+    has_symbol_reference = bool(re.search(r"\b(fx|fy|f_x|f_y|v0|v_0|vf|v_f|ax|ay|a_x|a_y)\b", normalized_problem))
+    word_count = len(normalized_problem.split())
+    has_short_followup_shape = word_count <= 40 and (
+        normalized_problem.endswith("?")
+        or normalized_problem.startswith(
+            (
+                "why ",
+                "how ",
+                "what ",
+                "where ",
+                "when ",
+                "does ",
+                "do ",
+                "is ",
+                "are ",
+                "can ",
+                "should ",
+                "so ",
+                "then ",
+                "but ",
+                "and ",
+                "ok ",
+                "okay ",
+            )
+        )
+    )
+    has_force_context = any(
+        cue in previous_text
+        for cue in (
+            "force",
+            "weight",
+            "normal",
+            "friction",
+            "tension",
+            "newton",
+            "incline",
+            "ramp",
+            "free-body",
+            "free body",
+            "sum f",
+            "net force",
+        )
+    )
+
+    if agent_id == "forces_agent" and "normal" in normalized_problem:
+        force_context_cues = ("weight" in previous_text) or ("force" in previous_text) or ("fy" in previous_text)
+        if force_context_cues and ("fy" in normalized_problem or "weight" in normalized_problem or has_context_reference):
+            return True
+
+    if agent_id == "forces_agent" and has_short_followup_shape and has_force_context:
+        return True
+
+    return has_short_followup_shape and (has_context_reference or has_symbol_reference)
+
+
+def _augment_problem_with_conversation_context(
+    problem: str, conversation_context: Dict[str, Any], agent_id: Optional[str] = None
+) -> str:
+    formatted_context = _format_conversation_context(conversation_context)
+    if not formatted_context:
+        return problem
+    if agent_id == "forces_agent":
+        return (
+            "Answer the current student question. The history may contain several different problems. "
+            "Decide whether this continues, changes, or returns to a previous problem. "
+            "Use earlier details only when they belong to the problem being asked about now. "
+            "Do not assume a short question is about the last problem.\n\n"
+            f"Previous conversation:\n{formatted_context}\n\n"
+            f"Current follow-up question:\n{problem}"
+        )
+    return (
+        "The student is asking a follow-up question about the previous conversation. "
+        "Preserve the earlier problem context and answer the current follow-up directly. "
+        "Do not restart with a generic check-in or repeat the whole previous solution unless the student asks for it. "
+        "If the follow-up asks whether an idea is correct, answer that yes/no question first and then explain briefly.\n\n"
+        f"Previous conversation:\n{formatted_context}\n\n"
+        f"Current follow-up question:\n{problem}"
+    )
+
+
 def _concept_remediation_explanation(agent_id: str, concept_tag: str) -> str:
     if concept_tag == "hookes_law":
         return (
@@ -1660,6 +1813,7 @@ async def solve_problem(
         kt_response = None
         remediation_followup = None
         class_identifier = None
+        conversation_context = _extract_conversation_context(request.context)
         if isinstance(request.context, dict):
             kt_response = request.context.get("knowledge_transfer_response")
             remediation_followup = request.context.get("knowledge_transfer_remediation_followup")
@@ -1763,6 +1917,35 @@ async def solve_problem(
                         "performance_trace": performance_trace,
                     },
                 )
+
+        if (
+            not isinstance(kt_response, dict)
+            and not isinstance(remediation_followup, dict)
+            and _is_contextual_followup(agent_id, request.problem, conversation_context)
+        ):
+            stage_started = time.perf_counter()
+            effective_problem = _augment_problem_with_conversation_context(
+                request.problem, conversation_context or {}, agent_id=agent_id
+            )
+            skip_hitl_gate = True
+            if isinstance(agent_context, dict):
+                agent_context = {
+                    **agent_context,
+                    "contextual_followup": True,
+                    "student_followup": request.problem,
+                }
+            else:
+                agent_context = {
+                    "conversation_context": conversation_context,
+                    "contextual_followup": True,
+                    "student_followup": request.problem,
+                }
+            _append_perf_stage(
+                api_trace_stages,
+                "conversation_context_followup",
+                stage_started,
+                skipped_hitl_gate=True,
+            )
 
         if not skip_hitl_gate and knowledge_transfer_gate and knowledge_transfer_gate.is_enabled_for(agent_id):
             if isinstance(kt_response, dict):
