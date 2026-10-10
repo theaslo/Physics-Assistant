@@ -134,6 +134,16 @@ class InteractionResponse(BaseModel):
     status: str = "success"
 
 
+class McpToolEventRequest(BaseModel):
+    service_name: str = Field(..., min_length=1, max_length=100)
+    tool_name: str = Field(..., min_length=1, max_length=100)
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    response: str
+    execution_time_ms: int = Field(..., ge=0)
+    success: bool
+    error_message: Optional[str] = None
+
+
 class KnowledgeTransferAttemptRequest(BaseModel):
     """Request model for logging HITL knowledge-transfer attempts."""
     user_identifier: str = Field(..., description="Student identifier (username or UUID)")
@@ -356,6 +366,20 @@ async def redis_health(db: DatabaseManager = Depends(get_db)):
         raise HTTPException(status_code=503, detail=str(e))
 
 # Interaction logging endpoints
+
+@app.post("/mcp/tool-events", tags=["Monitoring"])
+async def log_mcp_tool_event(event: McpToolEventRequest, db: DatabaseManager = Depends(get_db)):
+    """Record anonymous service telemetry without fabricating a student account."""
+    async with db.postgres.get_connection() as conn:
+        event_id = await conn.fetchval(
+            """INSERT INTO mcp_tool_events
+               (service_name, tool_name, parameters, response, execution_time_ms, success, error_message)
+               VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7) RETURNING id""",
+            event.service_name, event.tool_name, json.dumps(event.parameters), event.response,
+            event.execution_time_ms, event.success, event.error_message,
+        )
+    return {"status": "success", "event_id": str(event_id)}
+
 
 @app.post("/interactions", response_model=InteractionResponse, tags=["Interactions"])
 async def log_interaction(
@@ -820,7 +844,13 @@ async def rag_query(
     background_tasks: BackgroundTasks,
     db: DatabaseManager = Depends(get_db)
 ):
-    """Process RAG query through the complete pipeline"""
+    """Report unavailable until a retrieval pipeline has been initialized."""
+    pipeline = getattr(app.state, "rag_pipeline", None)
+    if pipeline is None:
+        raise HTTPException(status_code=503, detail={
+            "code": "rag_not_initialized",
+            "message": "Course-material retrieval has not been initialized.",
+        })
     try:
         from rag_system.rag_pipeline import RAGQuery, RAGMode, SearchType, GraphTraversalStrategy
         
@@ -839,13 +869,11 @@ async def rag_query(
             format_for_llm=request.get("format_for_llm", True)
         )
         
-        # Process through RAG pipeline (this would be initialized at startup)
-        # For now, return a placeholder response
-        return {
-            "status": "success",
-            "query": rag_query.text,
-            "message": "RAG pipeline endpoint ready - full implementation requires initialization"
-        }
+        result = await pipeline.process_query(rag_query)
+        return {"status": "success", "results": {
+            "concepts": result.related_concepts, "learning_paths": result.learning_path,
+            "context": result.formatted_context,
+        }, "metadata": {"total_results": result.total_results, "cache_hit": result.cache_hit}}
         
     except Exception as e:
         logger.error(f"RAG query failed: {e}")

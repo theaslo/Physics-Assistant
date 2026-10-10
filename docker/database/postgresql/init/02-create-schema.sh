@@ -12,6 +12,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "physics_assistant"
     \i /opt/physics-assistant/schema/01_core_tables.sql
     \i /opt/physics-assistant/schema/03_hitl_knowledge_transfer.sql
     \i /opt/physics-assistant/schema/04_agent_type_enum_updates.sql
+    \i /opt/physics-assistant/schema/05_mcp_tool_events.sql
     \i /opt/physics-assistant/schema/02_sample_data.sql
 EOSQL
 

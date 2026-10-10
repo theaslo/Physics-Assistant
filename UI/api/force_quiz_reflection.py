@@ -57,7 +57,7 @@ def is_force_quiz_reflection_prompt(agent_id: str, problem: str) -> bool:
             r"\bmissed\b",
             r"\bmisunderstanding\b",
             r"\breasoning\b",
-            r"\breflection\b",
+            r"\breflect(?:ion)?\b",
             r"\banaly[sz]e\b",
             r"\bmy\s+answer\b",
             r"\bcorrect\s+answer\b",
@@ -71,7 +71,8 @@ def is_force_quiz_reflection_prompt(agent_id: str, problem: str) -> bool:
         or bool(re.search(r"\(\s*\d+\s*pts?\s*\)", lower))
     ) and any(keyword in lower for keyword in ("because", "reasoning", "i said", "my answer", "i answered", "i chose"))
 
-    return (newton_context and reflection_context) or (physics_quiz_context and submitted_quiz_answer)
+    force_context = newton_context or physics_quiz_context or bool(re.search(r"\bforces?\b", lower))
+    return (force_context and reflection_context) or (physics_quiz_context and submitted_quiz_answer)
 
 
 def infer_newton_reflection_focus(problem: str) -> str:

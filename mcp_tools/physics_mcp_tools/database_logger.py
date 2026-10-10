@@ -22,32 +22,13 @@ class DatabaseLogger:
         self.api_host = os.getenv('DATABASE_API_HOST', 'localhost')
         self.api_port = int(os.getenv('DATABASE_API_PORT', '8001'))
         self.base_url = f"http://{self.api_host}:{self.api_port}"
-        self.session: Optional[aiohttp.ClientSession] = None
-
-    async def init_session(self):
-        """Initialize HTTP session for database API communication."""
-        if self.session is None or self.session.closed:
-            timeout = aiohttp.ClientTimeout(total=30)
-            connector = aiohttp.TCPConnector(limit=10)
-            self.session = aiohttp.ClientSession(
-                timeout=timeout,
-                connector=connector
-            )
-
-    async def close_session(self):
-        """Close HTTP session."""
-        if self.session and not self.session.closed:
-            await self.session.close()
+        self.pending_tasks = set()
 
     @asynccontextmanager
     async def get_session(self):
-        """Context manager for HTTP session."""
-        await self.init_session()
-        try:
-            yield self.session
-        except Exception as e:
-            logger.error(f"Session error: {e}")
-            raise
+        """Keep the session on the loop that owns this request, including startup probes."""
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
+            yield session
 
     async def log_tool_usage(
         self,
@@ -76,47 +57,19 @@ class DatabaseLogger:
         """
         try:
             async with self.get_session() as session:
-                # Prepare the payload
+                # Tool services have no authenticated student identity. Keep their
+                # telemetry separate from student interaction/account records.
                 payload = {
-                    "user_id": user_id,
-                    "tool_name": tool_name,
-                    "parameters": parameters,
-                    "response": response,
-                    "execution_time": execution_time,
-                    "success": success,
-                    "error_message": error_message,
-                    "service_name": self.service_name,
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "metadata": {
-                        "mcp_service": self.service_name,
-                        "tool_category": "physics",
-                        "transport": "streamable_http"
-                    }
-                }
-
-                # Convert to format expected by database API
-                interaction_payload = {
-                    "user_id": user_id,
-                    "agent_type": f"mcp_{self.service_name}",
-                    "interaction_type": "tool_call",
-                    "message": f"Tool: {tool_name}, Parameters: {json.dumps(parameters)}",
-                    "response": response,
-                    "execution_time_ms": int(execution_time * 1000),
-                    "metadata": {
-                        "mcp_service": self.service_name,
-                        "tool_name": tool_name,
-                        "success": success,
-                        "error_message": error_message,
-                        "transport": "streamable_http",
-                        "tool_category": "physics",
-                        **payload.get("metadata", {})
-                    }
+                    "service_name": self.service_name, "tool_name": tool_name,
+                    "parameters": parameters, "response": response,
+                    "execution_time_ms": max(0, int(execution_time * 1000)),
+                    "success": success, "error_message": error_message,
                 }
 
                 # Make the API call
                 async with session.post(
-                    f"{self.base_url}/interactions",
-                    json=interaction_payload,
+                    f"{self.base_url}/mcp/tool-events",
+                    json=payload,
                     headers={"Content-Type": "application/json"}
                 ) as response_obj:
                     if response_obj.status == 200:
@@ -162,30 +115,13 @@ class DatabaseLogger:
 
     async def log_server_status(self, status: str, details: Optional[Dict[str, Any]] = None):
         """
-        Log MCP server status to database.
+        Write server lifecycle status to the service log (no status API exists).
 
         Args:
             status: Server status (starting, running, stopping, error)
             details: Additional status details
         """
-        try:
-            async with self.get_session() as session:
-                payload = {
-                    "service_name": self.service_name,
-                    "status": status,
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "details": details or {}
-                }
-
-                async with session.post(
-                    f"{self.base_url}/api/v1/mcp-status",
-                    json=payload,
-                    headers={"Content-Type": "application/json"}
-                ) as response:
-                    if response.status != 200:
-                        logger.warning(f"Failed to log server status: {response.status}")
-        except Exception as e:
-            logger.warning(f"Failed to log server status: {e}")
+        logger.info("MCP server %s status=%s details=%s", self.service_name, status, details or {})
 
 
 def create_tool_wrapper(db_logger: DatabaseLogger, tool_name: str):
@@ -210,6 +146,9 @@ def create_tool_wrapper(db_logger: DatabaseLogger, tool_name: str):
             try:
                 # Execute the original tool
                 response = await original_tool(*args, **kwargs)
+                if isinstance(response, str) and response.lstrip().lower().startswith(("error:", "error in ", "error calculating ", "error during ")):
+                    success = False
+                    error_message = response
                 return response
             except Exception as e:
                 success = False
@@ -239,7 +178,7 @@ def create_tool_wrapper(db_logger: DatabaseLogger, tool_name: str):
                 try:
                     loop = asyncio.get_running_loop()
                     if loop.is_running():
-                        asyncio.create_task(
+                        task = asyncio.create_task(
                             db_logger.log_tool_usage(
                                 tool_name=tool_name,
                                 parameters=parameters,
@@ -249,6 +188,8 @@ def create_tool_wrapper(db_logger: DatabaseLogger, tool_name: str):
                                 error_message=error_message
                             )
                         )
+                        db_logger.pending_tasks.add(task)
+                        task.add_done_callback(db_logger.pending_tasks.discard)
                 except RuntimeError:
                     # Event loop not running or closed - skip logging
                     pass
