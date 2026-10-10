@@ -82,6 +82,7 @@ async def setup_schema():
         sample_data_path = schema_dir / "02_sample_data.sql"
         hitl_schema_path = schema_dir / "03_hitl_knowledge_transfer.sql"
         agent_enum_migration_path = schema_dir / "04_agent_type_enum_updates.sql"
+        mcp_events_path = schema_dir / "05_mcp_tool_events.sql"
 
         has_core_schema = await _table_exists(conn, "users")
         if has_core_schema:
@@ -94,6 +95,9 @@ async def setup_schema():
 
         if agent_enum_migration_path.exists():
             await _execute_sql_file(conn, agent_enum_migration_path, "Agent type enum updates applied successfully")
+
+        if mcp_events_path.exists():
+            await _execute_sql_file(conn, mcp_events_path, "MCP tool telemetry schema applied successfully")
 
         if sample_data_path.exists():
             has_admin_user = False

@@ -85,6 +85,24 @@ class DatabaseApiContractTests(unittest.TestCase):
     def run_async(self, coro):
         return asyncio.run(coro)
 
+    def test_mcp_telemetry_is_separate_from_student_accounts(self):
+        event_id = uuid.uuid4()
+        conn = FakeConnection(fetchval_results=[event_id])
+        db = FakeDatabase(conn)
+        event = api_server.McpToolEventRequest(service_name="forces", tool_name="get_force_principles",
+            parameters={}, response="Newton laws", execution_time_ms=2, success=True)
+        result = self.run_async(api_server.log_mcp_tool_event(event, db))
+        self.assertEqual(result["event_id"], str(event_id))
+        self.assertEqual(len(conn.calls), 1)
+        self.assertIn("INSERT INTO mcp_tool_events", conn.calls[0]["query"])
+        self.assertIsNone(db.logged_interaction)
+
+    def test_uninitialized_rag_is_explicitly_unavailable(self):
+        with self.assertRaises(api_server.HTTPException) as caught:
+            self.run_async(api_server.rag_query({}, FakeBackgroundTasks(), FakeDatabase(FakeConnection())))
+        self.assertEqual(caught.exception.status_code, 503)
+        self.assertEqual(caught.exception.detail["code"], "rag_not_initialized")
+
     def test_normalize_agent_type_accepts_current_identifier_forms(self):
         cases = {
             "physics_thermodynamics_agent": "thermodynamics",

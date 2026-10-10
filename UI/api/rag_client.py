@@ -113,12 +113,17 @@ class RAGClient:
             
             # Make synchronous request (will be wrapped in async context)
             if method.upper() == "GET":
-                response = self.session.get(url, params=data, timeout=self.timeout)
+                response = await asyncio.to_thread(self.session.get, url, params=data, timeout=self.timeout)
             else:
-                response = self.session.post(url, json=data, timeout=self.timeout)
-            
-            # Parse response
+                response = await asyncio.to_thread(self.session.post, url, json=data, timeout=self.timeout)
+
             result = response.json()
+            detail = result.get("detail") if isinstance(result, dict) else None
+            if response.status_code == 503 and isinstance(detail, dict) and detail.get("code") == "rag_not_initialized":
+                result = {"status": "unavailable", "metadata": {"fallback": True}}
+                self._cache_response(cache_key, result)
+                return result
+            response.raise_for_status()
             
             # Cache successful responses
             if response.status_code == 200:
@@ -181,6 +186,27 @@ class RAGClient:
         
         return {"status": "error", "message": "RAG system unavailable", "fallback": True}
     
+    async def get_physics_context(self, problem: str, agent_type: str,
+                                  include_formulas: bool = True, include_concepts: bool = True,
+                                  include_examples: bool = True) -> Optional[Dict[str, Any]]:
+        """Return retrieved evidence only, never placeholder or fallback knowledge."""
+        response = await self._make_request("rag/query", data={
+            "text": problem, "current_topic": agent_type.removesuffix("_agent"),
+            "mode": "comprehensive", "search_type": "hybrid", "limit": 5,
+            "use_personalization": False, "include_learning_paths": False,
+        })
+        if response.get("status") != "success" or response.get("metadata", {}).get("fallback") or response.get("fallback"):
+            return None
+        results = response.get("results")
+        if not isinstance(results, dict):
+            return None
+        context = {key: results.get(key, []) for key, enabled in (
+            ("concepts", include_concepts), ("formulas", include_formulas), ("examples", include_examples)
+        ) if enabled and results.get(key)}
+        if results.get("context"):
+            context["context"] = results["context"]
+        return context or None
+
     async def augment_agent_context(self, 
                                    problem: str, 
                                    agent_type: str,
@@ -204,7 +230,8 @@ class RAGClient:
                 "text": problem,
                 "agent_type": agent_type,
                 "user_id": user_id,
-                "search_type": "comprehensive",
+                "mode": "comprehensive",
+                "search_type": "hybrid",
                 "include_examples": True,
                 "include_formulas": True,
                 "include_learning_paths": True,

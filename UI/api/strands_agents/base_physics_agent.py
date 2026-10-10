@@ -19,11 +19,7 @@ from strands.models.ollama import OllamaModel
 from strands.tools.mcp import MCPClient
 from mcp.client.streamable_http import streamablehttp_client
 
-from force_quiz_reflection import (
-    build_force_quiz_reflection_response,
-    infer_newton_reflection_focus,
-    is_force_quiz_reflection_prompt,
-)
+from force_quiz_reflection import is_force_quiz_reflection_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +138,7 @@ class StrandsPhysicsAgent(ABC):
 
             self.rag_client = RAGClient(
                 api_base_url=self.rag_api_url,
+                timeout=3,
                 enable_cache=True,
                 enable_fallback=True
             )
@@ -242,7 +239,7 @@ class StrandsPhysicsAgent(ABC):
 
             if self.rag_client:
                 try:
-                    rag_context = self.rag_client.get_physics_context(
+                    rag_context = await self.rag_client.get_physics_context(
                         problem,
                         agent_type=self.agent_id,
                         include_formulas=True,
@@ -302,7 +299,10 @@ class StrandsPhysicsAgent(ABC):
                 rag_context_used=rag_context is not None,
             )
 
-            if self.agent_id == "forces_agent" and self._is_contextual_followup_problem(problem, context):
+            contextual_followup = self._is_contextual_followup_problem(problem, context)
+            if self.agent_id == "forces_agent" and (
+                contextual_followup or is_force_quiz_reflection_prompt(self.agent_id, problem)
+            ):
                 context_followup_stage_started = time.perf_counter()
                 context_followup_result = await self._solve_conversation_turn(problem, context)
                 self._append_perf_stage(
@@ -343,58 +343,10 @@ class StrandsPhysicsAgent(ABC):
                             "rag_enabled": self.rag_client is not None,
                             "rag_context_used": rag_context is not None,
                             "framework": "strands",
-                            "contextual_followup": True,
+                            "contextual_followup": contextual_followup,
                             "llm_response_used": True,
-                            "performance_trace": perf_trace,
-                        },
-                    }
-
-            if is_force_quiz_reflection_prompt(self.agent_id, problem):
-                reflection_stage_started = time.perf_counter()
-                reflection_result = self._build_force_quiz_reflection_mcp_response(problem)
-                self._append_perf_stage(
-                    perf_stages,
-                    "forces_quiz_reflection_mcp",
-                    reflection_stage_started,
-                    recovered=bool(reflection_result),
-                )
-                if reflection_result:
-                    execution_time_ms = int((time.time() - start_time) * 1000)
-                    db_stage_started = time.perf_counter()
-                    if self.db_client:
-                        self._log_interaction(
-                            problem=problem,
-                            solution=reflection_result["solution"],
-                            tools_used=reflection_result["tools_used"],
-                            execution_time_ms=execution_time_ms,
-                            user_id=user_id,
-                            session_id=session_id,
-                        )
-                    self._append_perf_stage(
-                        perf_stages,
-                        "database_log_interaction",
-                        db_stage_started,
-                        db_logging_enabled=self.db_client is not None,
-                    )
-                    perf_trace = self._build_perf_trace(perf_stages, perf_started)
-                    return {
-                        "success": True,
-                        "agent_id": self.agent_id,
-                        "problem": problem,
-                        "solution": reflection_result["solution"],
-                        "reasoning": "Used MCP check_equilibrium for Newton's-laws quiz reflection.",
-                        "tools_used": reflection_result["tools_used"],
-                        "execution_time_ms": execution_time_ms,
-                        "diagram": reflection_result.get("diagram"),
-                        "metadata": {
-                            "rag_enabled": self.rag_client is not None,
-                            "rag_context_used": rag_context is not None,
-                            "framework": "strands",
-                            "quiz_reflection_mode": {
-                                "enabled": True,
-                                "concept_tag": reflection_result["concept_tag"],
-                                "mcp_tool_called": True,
-                            },
+                            **({"quiz_reflection_mode": context_followup_result["quiz_reflection_mode"]}
+                               if "quiz_reflection_mode" in context_followup_result else {}),
                             "performance_trace": perf_trace,
                         },
                     }
@@ -2033,46 +1985,6 @@ class StrandsPhysicsAgent(ABC):
             return "right"
         return "opposite the motion or intended motion"
 
-    def _build_force_quiz_reflection_mcp_response(self, problem: str) -> Optional[Dict[str, Any]]:
-        """Ground Newton quiz-reflection guidance in a simple MCP force-balance check."""
-        if not self.mcp_client:
-            return None
-
-        concept_tag = infer_newton_reflection_focus(problem)
-        if concept_tag == "newton_second_law":
-            forces = [
-                {"magnitude": 10, "angle": 0},
-                {"magnitude": 4, "angle": 180},
-            ]
-        else:
-            forces = [
-                {"magnitude": 10, "angle": 0},
-                {"magnitude": 10, "angle": 180},
-            ]
-
-        try:
-            tool_result = self._call_mcp_tool_direct(
-                "check_equilibrium",
-                {"forces_data": json.dumps(forces)},
-            )
-        except Exception as exc:
-            logger.warning("Newton quiz reflection MCP grounding failed: %s", exc)
-            return None
-
-        raw_text = self._extract_text_from_mcp_tool_result(tool_result)
-        if not raw_text or self._is_mcp_error_text(raw_text):
-            return None
-
-        return {
-            "solution": build_force_quiz_reflection_response(
-                problem,
-                concept_tag=concept_tag,
-            ),
-            "tools_used": ["check_equilibrium"],
-            "diagram": None,
-            "concept_tag": concept_tag,
-        }
-
     async def _try_fast_mcp_guided_solution(
         self,
         problem: str,
@@ -2162,7 +2074,7 @@ class StrandsPhysicsAgent(ABC):
     def _is_mcp_error_text(self, text: str) -> bool:
         """Identify tool-level error payloads returned as plain text."""
         normalized = text.strip().lower()
-        return normalized.startswith("error:")
+        return bool(re.match(r"^error(?::|\s+(?:in|calculating|during)\b)", normalized))
 
     async def _build_fast_mcp_plan_with_llm(
         self,
@@ -2248,6 +2160,9 @@ class StrandsPhysicsAgent(ABC):
         json_format: bool = False,
         model_id: Optional[str] = None,
         think: Optional[bool] = None,
+        system: Optional[str] = None,
+        messages: Optional[list[Dict[str, str]]] = None,
+        model_options: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Call Ollama directly for short planner/rewrite prompts."""
         payload: Dict[str, Any] = {
@@ -2261,18 +2176,33 @@ class StrandsPhysicsAgent(ABC):
         }
         if json_format:
             payload["format"] = "json"
+        if model_options:
+            payload["options"].update(model_options)
         if think is not None:
             payload["think"] = think
+        if system is not None:
+            payload["system"] = system
+
+        endpoint = "generate"
+        if messages is not None:
+            endpoint = "chat"
+            payload.pop("prompt")
+            payload.pop("system", None)
+            payload["messages"] = (
+                ([{"role": "system", "content": system}] if system else [])
+                + messages + [{"role": "user", "content": prompt}]
+            )
 
         connect_timeout = min(3.0, max(1.0, timeout_seconds))
         response = requests.post(
-            f"{self.llm_host.rstrip('/')}/api/generate",
+            f"{self.llm_host.rstrip('/')}/api/{endpoint}",
             json=payload,
             timeout=(connect_timeout, timeout_seconds),
         )
         response.raise_for_status()
         data = response.json()
-        return str(data.get("response", "")).strip()
+        content = data.get("message", {}).get("content", "") if messages is not None else data.get("response", "")
+        return str(content).strip()
 
     def _parse_llm_json_object(self, text: str) -> Optional[Dict[str, Any]]:
         """Parse a JSON object even if the model wraps it in markdown or thinking text."""
@@ -4553,12 +4483,17 @@ class StrandsPhysicsAgent(ABC):
         context_parts = []
 
         if "concepts" in rag_context and rag_context["concepts"]:
-            concepts = ", ".join(rag_context["concepts"][:5])
+            concepts = ", ".join(str(item) for item in rag_context["concepts"][:5])
             context_parts.append(f"Relevant concepts: {concepts}")
 
         if "formulas" in rag_context and rag_context["formulas"]:
-            formulas = "; ".join(rag_context["formulas"][:3])
+            formulas = "; ".join(str(item) for item in rag_context["formulas"][:3])
             context_parts.append(f"Key formulas: {formulas}")
+
+        if rag_context.get("context"):
+            context_parts.append(str(rag_context["context"])[:4000])
+        if rag_context.get("examples"):
+            context_parts.append("Examples: " + str(rag_context["examples"][:2])[:2000])
 
         if context_parts:
             context_str = " | ".join(context_parts)

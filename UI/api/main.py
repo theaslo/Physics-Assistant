@@ -291,7 +291,9 @@ def _log_slow_trace(agent_id: str, user_id: Optional[str], performance_trace: Di
     )
 
 
-def _extract_conversation_context(context: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _extract_conversation_context(
+    context: Optional[Dict[str, Any]], agent_id: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
     if not isinstance(context, dict):
         return None
     raw_context = context.get("conversation_context")
@@ -302,7 +304,8 @@ def _extract_conversation_context(context: Optional[Dict[str, Any]]) -> Optional
         return None
 
     recent_messages: list[Dict[str, str]] = []
-    for raw_message in raw_messages[-6:]:
+    history_limit = 40 if agent_id == "forces_agent" else 6
+    for raw_message in raw_messages[-history_limit:]:
         if not isinstance(raw_message, dict):
             continue
         role = str(raw_message.get("role") or "").strip().lower()
@@ -1813,7 +1816,7 @@ async def solve_problem(
         kt_response = None
         remediation_followup = None
         class_identifier = None
-        conversation_context = _extract_conversation_context(request.context)
+        conversation_context = _extract_conversation_context(request.context, agent_id)
         if isinstance(request.context, dict):
             kt_response = request.context.get("knowledge_transfer_response")
             remediation_followup = request.context.get("knowledge_transfer_remediation_followup")
@@ -1931,6 +1934,7 @@ async def solve_problem(
             if isinstance(agent_context, dict):
                 agent_context = {
                     **agent_context,
+                    "conversation_context": conversation_context,
                     "contextual_followup": True,
                     "student_followup": request.problem,
                 }

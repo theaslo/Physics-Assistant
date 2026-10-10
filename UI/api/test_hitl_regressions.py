@@ -1,6 +1,8 @@
+import json
 import math
 import os
 import unittest
+from unittest.mock import AsyncMock, Mock
 from typing import Any, Dict, List, Optional
 
 from hitl_knowledge_transfer import KnowledgeTransferGate
@@ -301,6 +303,61 @@ class HitlApiRouteRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         self.api_main.knowledge_transfer_gate = self.original_gate
         self.api_main.get_or_create_agent = self.original_get_or_create_agent
+
+    async def test_forces_history_keeps_quiz_through_multiple_reflection_steps(self):
+        messages = [{"role": "user" if i % 2 == 0 else "assistant", "content": f"Turn {i}"} for i in range(42)]
+        messages[2]["content"] = "My Newton's laws quiz question and original reasoning"
+        context = {"conversation_context": {"recent_messages": messages}}
+        forces = self.api_main._extract_conversation_context(context, "forces_agent")
+        self.assertEqual(len(forces["recent_messages"]), 40)
+        self.assertIn("quiz question", forces["recent_messages"][0]["content"])
+        kinematics = self.api_main._extract_conversation_context(context, "kinematics_agent")
+        self.assertEqual(len(kinematics["recent_messages"]), 6)
+
+    async def test_one_word_quiz_reply_reaches_forces_grader_with_ui_context(self):
+        from strands_agents.forces_agent import ForcesAgent
+
+        quiz = "A puck leaves a stick on frictionless ice. Will it speed up? I chose D because I hit it."
+        tutor_question = "What is the net force after the puck loses contact?"
+        history = [
+            {"role": "user", "content": "Help me review my Newton's laws quiz with hints."},
+            {"role": "assistant", "content": "Please provide the quiz question and your reasoning."},
+            {"role": "user", "content": quiz},
+            {"role": "assistant", "content": tutor_question},
+        ]
+        agent = ForcesAgent(enable_database_logging=False, enable_rag=False)
+        agent.initialized = True
+        agent.mcp_client = Mock()
+        agent.mcp_client.call_tool_sync.return_value = {
+            "status": "success", "content": [{"text": "Zero net force implies zero acceleration."}],
+        }
+        agent._request_ollama_generate = Mock(side_effect=[
+            json.dumps({"action": "feedback", "problem_message_index": 2,
+                        "problem_statement": "A puck leaves a stick on frictionless ice. Will it speed up?"}),
+            json.dumps({"assessment": "correct", "complete": False, "question": "What follows for acceleration?"}),
+        ])
+        gate = Mock()
+        gate.is_enabled_for.return_value = True
+        gate.maybe_create_check_with_trace = AsyncMock(side_effect=AssertionError("Must not restart the check-in"))
+        self.api_main.knowledge_transfer_gate = gate
+        self.api_main.get_or_create_agent = AsyncMock(return_value=agent)
+        response = await self.api_main.solve_problem("forces_agent", self.api_main.ProblemSolveRequest(
+            problem="zero", user_id="short-reply-test",
+            context={"conversation_context": {
+                "recent_messages": history, "previous_user_problem": quiz,
+                "previous_assistant_response": tutor_question,
+            }},
+        ))
+        self.assertTrue(response.success)
+        self.assertEqual(response.solution, "That step is correct.\n\nWhat follows for acceleration?")
+        self.assertIsNone(response.hitl)
+        self.assertEqual(response.tools_used, ["get_force_principles"])
+        self.assertEqual(response.metadata["quiz_reflection_mode"]["stage"], "feedback")
+        route = agent._request_ollama_generate.call_args_list[0]
+        self.assertTrue(route.args[0].startswith("Message 4 (the CURRENT student turn):\nzero"))
+        self.assertEqual(len(route.kwargs["messages"]), len(history))
+        self.assertTrue(route.kwargs["messages"][-1]["content"].endswith(tutor_question))
+        gate.maybe_create_check_with_trace.assert_not_called()
 
     async def test_wrong_hitl_answer_returns_remediation_without_solver(self):
         class StubGate:

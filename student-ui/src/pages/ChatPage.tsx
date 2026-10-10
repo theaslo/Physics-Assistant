@@ -55,7 +55,7 @@ function serializeDrawingForAnalysis(drawing?: StudentDrawing) {
 function buildConversationContext(messages: Message[], agentId: string) {
   const recentMessages = messages
     .filter((message) => message.agentId === agentId)
-    .slice(-6)
+    .slice(agentId === 'forces_agent' ? -40 : -6)
     .map((message) => ({
       role: message.role,
       content: message.content.slice(0, 2000),
