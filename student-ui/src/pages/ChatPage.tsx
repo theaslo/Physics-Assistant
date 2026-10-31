@@ -58,7 +58,7 @@ function buildConversationContext(messages: Message[], agentId: string) {
     .slice(agentId === 'forces_agent' ? -40 : -6)
     .map((message) => ({
       role: message.role,
-      content: message.content.slice(0, 2000),
+      content: message.content.slice(0, agentId === 'math_agent' ? 12000 : 2000),
       agent_id: message.agentId,
       tools_used: message.toolsUsed || [],
       has_diagram: Boolean(message.diagram),

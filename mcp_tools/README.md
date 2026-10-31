@@ -73,6 +73,31 @@ analyze_forces_on_incline(mass=5.0, angle_degrees=30, coefficient_friction=0.3)
 - **Ohm's Law**: Calculate voltage, current, and resistance relationships
 - **Power Calculations**: Determine electrical power in circuits
 
+### Math server: linear equation systems
+
+The Math MCP server exposes two reusable batch tools:
+
+- `solve_linear_systems(systems)` accepts up to 20 systems, each containing two
+  equation strings and optional quantity labels. It returns exact solutions,
+  elimination data, and substitution checks. Singular systems are classified as
+  `inconsistent` or `dependent`.
+- `validate_physics_equations(problems, allowed_topics, exclude_fingerprints,
+  previous_systems)` checks up to 10 LLM-generated candidates. It requires two
+  declared physical quantities, two independent linear equations, and manageable
+  solutions. It rejects duplicate systems, including reordered or scaled equations.
+
+Both tools return `schema_version: 1` and a `results` list with per-item results
+or errors. Exact numbers are serialized as strings, including fractions such as
+`"1/3"`. For example, the solver accepts:
+
+```json
+{"systems": [{"equations": ["2v_i + v_f = 9", "v_f - v_i = 3"]}]}
+```
+
+The tutoring API keeps question generation, conversation history, and LaTeX
+presentation. It invokes these tools directly for validation and solving; an
+unavailable MCP service never triggers a local calculator fallback.
+
 ---
 
 ## 📋 Installation & Setup

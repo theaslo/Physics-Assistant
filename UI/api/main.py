@@ -305,6 +305,7 @@ def _extract_conversation_context(
 
     recent_messages: list[Dict[str, str]] = []
     history_limit = 40 if agent_id == "forces_agent" else 6
+    content_limit = 12000 if agent_id == "math_agent" else 2000
     for raw_message in raw_messages[-history_limit:]:
         if not isinstance(raw_message, dict):
             continue
@@ -315,7 +316,7 @@ def _extract_conversation_context(
         recent_messages.append(
             {
                 "role": role,
-                "content": content[:2000],
+                "content": content[:content_limit],
             }
         )
 
@@ -324,8 +325,8 @@ def _extract_conversation_context(
 
     return {
         "recent_messages": recent_messages,
-        "previous_user_problem": str(raw_context.get("previous_user_problem") or "").strip()[:2000],
-        "previous_assistant_response": str(raw_context.get("previous_assistant_response") or "").strip()[:2000],
+        "previous_user_problem": str(raw_context.get("previous_user_problem") or "").strip()[:content_limit],
+        "previous_assistant_response": str(raw_context.get("previous_assistant_response") or "").strip()[:content_limit],
     }
 
 
