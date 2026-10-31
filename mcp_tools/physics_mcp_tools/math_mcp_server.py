@@ -4,6 +4,10 @@ import json
 import re
 
 from mcp.server.fastmcp import FastMCP
+from physics_mcp_tools.linear_systems import (
+    solve_linear_systems as calculate_linear_systems,
+    validate_physics_equations as check_physics_equations,
+)
 
 # Initialize FastMCP server
 #mcp = FastMCP("math")
@@ -33,6 +37,30 @@ def serve(host, port, transport):
     logger.info('Starting Math MCP Server')
     
     mcp = FastMCP(NAME, stateless_http=False)
+
+    @mcp.tool()
+    async def solve_linear_systems(systems: list[dict]) -> dict:
+        """Solve batches of two linear equations in two unknowns with exact arithmetic.
+
+        Each system contains equations (two strings) and optional quantities.
+        Returns structured solutions, elimination steps, substitution checks,
+        and classifications for inconsistent or dependent systems.
+        """
+        return calculate_linear_systems(systems)
+
+    @mcp.tool()
+    async def validate_physics_equations(
+        problems: list[dict], allowed_topics: list[str],
+        exclude_fingerprints: list[str] | None = None,
+        previous_systems: list[list[str]] | None = None,
+    ) -> dict:
+        """Check and solve LLM-generated physics equation pairs before display.
+
+        Requires two declared physical quantities and two linear constraints,
+        verifies a unique exact solution by substitution, and rejects duplicates.
+        Returns a per-candidate acceptance or error with schema_version 1.
+        """
+        return check_physics_equations(problems, allowed_topics, exclude_fingerprints, previous_systems)
 
     def with_diagram_payload(result_text: str, payload: dict) -> str:
         """Append machine-readable diagram payload for downstream UI rendering."""
