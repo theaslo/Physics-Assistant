@@ -407,6 +407,7 @@ services:
       HITL_GATE_ENABLED: "true"
       HITL_GATE_THRESHOLD: "0.70"
       HITL_PILOT_AGENTS: "forces_agent,kinematics_agent"
+      HITL_CONTEXTUAL_AGENTS: "${HITL_CONTEXTUAL_AGENTS-momentum_agent}"
     volumes:
       - ./UI/logs:/app/logs
       - ./UI/temp:/app/temp

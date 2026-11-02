@@ -5,11 +5,13 @@ Uses Strands SDK with MCP momentum tools
 """
 
 import os
+import re
+import json
 from typing import Dict, Any
-from .base_physics_agent import StrandsPhysicsAgent
+from .conversation_agent import ConversationPhysicsAgent
 
 
-class MomentumAgent(StrandsPhysicsAgent):
+class MomentumAgent(ConversationPhysicsAgent):
     """
     Strands-based agent for momentum problems
 
@@ -21,6 +23,120 @@ class MomentumAgent(StrandsPhysicsAgent):
     - Inelastic collisions
     - Perfectly inelastic collisions
     """
+
+    worked_solution_required = True
+
+    def _ground_worked_solution(self, worked, tool_outputs):
+        """Use executed calculation values for the core equations and substitutions."""
+        number = r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?"
+        for output in reversed(tool_outputs):
+            name, args, result = output["tool"], output["arguments"], output["result"]
+            if name == "calculate_momentum_1d":
+                match = re.search(rf"^\s*p = ({number}) kg", result, re.M)
+                if match and all(key in args for key in ("mass", "velocity")):
+                    return {**worked, "principle": "Linear momentum is mass times velocity, and points in the velocity's direction.",
+                            "equation": r"p = mv",
+                            "substitution": rf"p = ({args['mass']:g}\,\text{{kg}})({args['velocity']:g}\,\text{{m/s}}) = {match[1]}\,\text{{kg}}\cdot\text{{m/s}}",
+                            "check": "The units are kg·m/s. Multiplying by a positive mass preserves the velocity's direction."}
+            if name in {"calculate_impulse_1d", "momentum_impulse_theorem"}:
+                grounded = {**worked,
+                    "principle": "Net impulse equals the change in momentum. For a constant or average net force, impulse also equals force times the time interval.",
+                    "equation": r"J = \Delta p = p_f - p_i = F_{\mathrm{avg}}\Delta t",
+                    "check": "N·s and kg·m/s are equivalent units. The impulse points in the direction of the momentum change."}
+                if name == "calculate_impulse_1d":
+                    values = re.findall(rf"^\s*J = ({number}) N", result, re.M)
+                    lines = []
+                    if values and args.get("force") is not None and args.get("time") is not None:
+                        lines.append(rf"J = ({args['force']:g}\,\text{{N}})({args['time']:g}\,\text{{s}}) = {values.pop(0)}\,\text{{N}}\cdot\text{{s}}")
+                    if values and args.get("initial_momentum") is not None and args.get("final_momentum") is not None:
+                        lines.append(rf"J = ({args['final_momentum']:g} - ({args['initial_momentum']:g}))\,\text{{kg}}\cdot\text{{m/s}} = {values[0]}\,\text{{N}}\cdot\text{{s}}")
+                    if lines:
+                        grounded["substitution"] = r"\begin{gathered}" + r" \\ ".join(lines) + r"\end{gathered}"
+                return grounded
+            if name == "momentum_conservation_1d":
+                try:
+                    data = json.loads(args["collision_data"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                match = re.search(rf"^\s*vf = [^\n]*= ({number}) m/s", result, re.M)
+                if data.get("collision_type", "").replace(" ", "_").lower() == "perfectly_inelastic" and match:
+                    m1, m2, vi1, vi2 = (data[key] for key in ("m1", "m2", "v1i", "v2i"))
+                    return {**worked,
+                            "principle": "The two-cart system's momentum is conserved when net external impulse is negligible. Sticking carts have a common final velocity.",
+                            "equation": r"m_1v_{1i}+m_2v_{2i}=(m_1+m_2)v_f",
+                            "substitution": rf"v_f = \frac{{({m1:g})({vi1:g})+({m2:g})({vi2:g})}}{{{m1:g}+{m2:g}}} = {match[1]}\,\text{{m/s}}",
+                            "check": "Both objects have the same final velocity after sticking. Their combined final momentum equals the initial system momentum."}
+        return worked
+
+    tutoring_guidance = """
+Momentum tutoring: use the student's actual objects and givens. Ask one targeted
+question about the next decision: system boundary, net external impulse, signed
+velocities, or the momentum/impulse equation. When selecting an equation, ask
+for that equation first and wait for the student's attempt before asking them
+to substitute values or calculate the final result. A frictionless track permits
+conservation of the carts' horizontal momentum because horizontal external
+impulse is negligible; it does not mean no forces act. Bouncing alone does not
+establish elasticity. Distinguish conserved system momentum from each object's
+momentum, and kinetic energy from total energy. For a rebound, retain the signs
+of initial and final velocity in Delta p. For recoil, use equal and opposite
+momentum, not necessarily equal speeds. For a force-time graph, impulse is signed
+area, not its peak force. Do not give the final numerical answer in a check-in
+or unfinished hint. If the student says "I'm lost" or "stuck", ask a smaller
+prerequisite question; give a full solution only when explicitly requested.
+For calculations, objects sticking together require collision_type="perfectly_inelastic"
+in momentum_conservation_1d; plain "inelastic" requires a separately supplied
+final velocity. For impulse from a rebound, use momentum_impulse_theorem with
+mass, initial_velocity, and signed final_velocity; do not invent a force or time.
+"""
+
+    check_in_guidance = """
+For this MULTIPLE-CHOICE check-in, ask which physical principle or assumption
+applies to these objects. Do not ask students to choose between equations:
+general and special forms can both be correct. Offer mutually exclusive
+principles with exactly one correct choice under the stated conditions.
+"""
+
+    async def _review_contextual_check(self, question, check, evidence):
+        for attempt in range(2):
+            review = await self._reflection_model(
+                json.dumps({"original_problem": question, "check": check}),
+                "Independently review this multiple-choice physics check against the original problem and verified principles. "
+                "Return JSON with correct_option_ids (array of ALL physically correct option IDs) and issue (string). "
+                "Evaluate EVERY option, not just the supplied answer key. General and special forms of the same "
+                "conservation equation can both be valid. No option may require unstated assumptions or invented inputs. "
+                "Set correct_option_ids=[] if the question is ambiguous.\nVerified principles:\n" + evidence,
+                tokens=400,
+            )
+            if review.get("correct_option_ids") == [check["correct_option_id"]]:
+                return check
+            if attempt == 0:
+                check = await self._reflection_model(
+                    json.dumps({"original_problem": question, "rejected_check": check, "review": review}),
+                    "Rewrite the check to remove ambiguity and have exactly ONE correct option. "
+                    "Ask about the physical principle or system assumption for the original setup, not equations or arithmetic. "
+                    "Return JSON with needs_check=true, confidence (0 to 1), concept_tag, question, "
+                    "options (3 or 4 objects with id and text), and correct_option_id. "
+                    "Do not reveal the final answer.\nVerified principles:\n" + evidence,
+                    tokens=900,
+                )
+                check = self._validate_contextual_check(check)
+        raise RuntimeError("The tutor could not prepare an unambiguous check-in. Please try again.")
+
+    def _conversation_answer_error(self, answer, *, numerical_verified=False):
+        # Some model JSON decodes a single LaTeX backslash as a tab. Validate
+        # the intended unit text too, before the frontend repairs its display.
+        answer = answer.replace("\t" + "ext{", r"\text{")
+        if (re.search(r"perfectly inelastic|stick(?:s|ing)? together|combined carts", answer, re.I)
+                and re.search(r"(?:total|system(?:'s)?) mass(?: of the system)? (?:increases|increased|is increased)\b", answer, re.I)):
+            return ("The two-object system contains the same masses before and after sticking. "
+                    "Its total mass does not increase during the collision. Explain the sharing of momentum "
+                    "between both objects using this consistent system boundary.")
+        if not numerical_verified and re.search(
+                r"(?<![\w.])[+-]?\d+(?:\.\d+)?\s*(?:\\(?:text|mathrm)\{\s*)?(?:kg\b|N\b|m/s)", answer):
+            return ("This is a conceptual explanation with no verified numerical calculation. "
+                    "Remove numerical quantities with physical units. Explain directions and system boundaries "
+                    "qualitatively; do not reuse a velocity value as a momentum value. Symbolic equations are allowed.")
+        return None
 
     def __init__(
         self,
@@ -63,10 +179,10 @@ Your role is to help students understand and solve problems related to:
   - m₁v₁ᵢ + m₂v₂ᵢ = m₁v₁f + m₂v₂f
 - Elastic Collisions
   - Both momentum and kinetic energy conserved
-  - Objects bounce off each other
+  - Bouncing alone does not establish that a collision is elastic
 - Inelastic Collisions
-  - Only momentum conserved
-  - Some kinetic energy lost
+  - System momentum is conserved when net external impulse is negligible
+  - Kinetic energy can become internal energy; total energy is conserved
 - Perfectly Inelastic Collisions
   - Objects stick together after collision
   - Maximum kinetic energy loss
@@ -94,6 +210,8 @@ Key Concepts:
 - Momentum is conserved in all collisions (isolated system)
 - Kinetic energy only conserved in elastic collisions
 - Direction matters (momentum is a vector)
+- A single ball rebounding from a wall receives external impulse; its own momentum is not conserved
+- A zero total momentum does not imply zero kinetic energy for the system
 
 Always:
 - Use SI units (kg·m/s for momentum)

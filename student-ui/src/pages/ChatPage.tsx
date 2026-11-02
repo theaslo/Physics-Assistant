@@ -31,17 +31,13 @@ import WelcomeMessage from '../components/WelcomeMessage'
 import PhysicsConstants from '../components/PhysicsConstants'
 import KnowledgeCheckPanel from '../components/KnowledgeCheckPanel'
 import { getAgentIcon } from '../themes/uconn-theme'
+import { isFullSolutionRequest } from '../utils/tutoring-intent'
 
 const DRAWER_WIDTH = 280
 const NEXT_STEP_PATTERN = /\b(next|step|hint|continue)\b/i
-const FULL_SOLUTION_PATTERN = /\b(full solution|show(?: me)?(?: the)? solution|give(?: me)?(?: the)? solution|i'?m lost|i am lost|completely lost|really lost|stuck)\b/i
 
 function isNextStepRequest(message: string): boolean {
   return NEXT_STEP_PATTERN.test(message.trim())
-}
-
-function isFullSolutionRequest(message: string): boolean {
-  return FULL_SOLUTION_PATTERN.test(message.trim())
 }
 
 function serializeDrawingForAnalysis(drawing?: StudentDrawing) {
@@ -59,7 +55,7 @@ function serializeDrawingForAnalysis(drawing?: StudentDrawing) {
 function buildConversationContext(messages: Message[], agentId: string) {
   const recentMessages = messages
     .filter((message) => message.agentId === agentId)
-    .slice(agentId === 'forces_agent' ? -40 : -6)
+    .slice(['forces_agent', 'momentum_agent'].includes(agentId) ? -40 : -6)
     .map((message) => ({
       role: message.role,
       content: message.content.slice(0, agentId === 'math_agent' ? 12000 : 2000),
@@ -182,8 +178,8 @@ export default function ChatPage() {
         setError('Complete the knowledge check before sending a new prompt.')
         return
       }
-      const remediationFollowUp = !newProblem && pendingHitlRemediation ? pendingHitlRemediation : null
-      const agentForMessage = remediationFollowUp?.agentId || selectedAgent
+      const remediationFollowUp = !newProblem && pendingHitlRemediation?.agentId === selectedAgent ? pendingHitlRemediation : null
+      const agentForMessage = selectedAgent
       const drawingAnalysisPayload = serializeDrawingForAnalysis(drawing)
       if (!agentForMessage) {
         setError('Select a physics agent before sending a message.')
@@ -229,6 +225,7 @@ export default function ChatPage() {
             remediationFollowUp.originalProblem,
             user?.username || 'react_user',
             {
+              ...(conversationContext ? { conversation_context: conversationContext } : {}),
               knowledge_transfer_remediation_followup: {
                 check_id: remediationFollowUp.checkId,
                 concept_tag: remediationFollowUp.conceptTag,
@@ -379,6 +376,16 @@ export default function ChatPage() {
           return
         }
         if (response.success) {
+          if (agentId === 'momentum_agent') {
+            addMessage({
+              id: `check-question-${activeCheck.checkId}`, role: 'assistant', agentId,
+              timestamp: Date.now(), content: activeCheck.question + '\n' + activeCheck.options.map((o) => `${o.id}: ${o.text}`).join('\n'),
+            })
+            addMessage({
+              id: `check-answer-${activeCheck.checkId}`, role: 'user', agentId,
+              timestamp: Date.now(), content: activeCheck.options.find((o) => o.id === selectedOptionId)?.text || selectedOptionId,
+            })
+          }
           if (response.hitl?.status === 'remediation_required') {
             setPendingHitlRemediation({
               checkId: activeCheck.checkId,
@@ -393,10 +400,16 @@ export default function ChatPage() {
           appendAssistantMessage(agentId, response)
         } else {
           setError(response.error || 'Failed to process knowledge-check answer')
+          if (agentId === 'momentum_agent') {
+            setPendingKnowledgeCheck(activeCheck)
+          }
         }
       } catch (err) {
         console.error('Knowledge-check submission error:', err)
         setError('Failed to submit knowledge-check answer. Please try again.')
+        if (agentId === 'momentum_agent') {
+          setPendingKnowledgeCheck(activeCheck)
+        }
       } finally {
         setIsKnowledgeCheckProcessing(false)
         setLoading(false)
@@ -406,6 +419,7 @@ export default function ChatPage() {
       pendingKnowledgeCheck,
       selectedAgent,
       user,
+      addMessage,
       appendAssistantMessage,
       setLoading,
       setError,

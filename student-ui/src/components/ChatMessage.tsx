@@ -1621,21 +1621,6 @@ export default function ChatMessage({ message }: ChatMessageProps) {
             <ForcesDiagramRenderer diagram={message.diagram} markerId={markerId} />
           )}
 
-          {/* Tools used indicator */}
-          {message.toolsUsed && message.toolsUsed.length > 0 && (
-            <Box sx={{ mt: 1, display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-              {message.toolsUsed.map((tool, i) => (
-                <Chip
-                  key={i}
-                  label={tool}
-                  size="small"
-                  variant="outlined"
-                  sx={{ fontSize: '0.7rem' }}
-                />
-              ))}
-            </Box>
-          )}
-
           {/* Timestamp */}
           <Typography
             variant="caption"
