@@ -20,6 +20,7 @@ from strands.tools.mcp import MCPClient
 from mcp.client.streamable_http import streamablehttp_client
 
 from force_quiz_reflection import is_force_quiz_reflection_prompt
+from tutoring_profiles import MECHANICS_AGENTS
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,7 @@ class StrandsPhysicsAgent(ABC):
 
             # Get tools from MCP server
             tools = self.mcp_client.list_tools_sync()
+            self.mcp_tool_specs = [tool.tool_spec for tool in tools]
             logger.info(f"Loaded {len(tools)} tools from MCP server")
 
             # Create Ollama model
@@ -300,14 +302,14 @@ class StrandsPhysicsAgent(ABC):
             )
 
             contextual_followup = self._is_contextual_followup_problem(problem, context)
-            if self.agent_id == "forces_agent" and (
+            if self.agent_id in MECHANICS_AGENTS or (self.agent_id == "forces_agent" and (
                 contextual_followup or is_force_quiz_reflection_prompt(self.agent_id, problem)
-            ):
+            )):
                 context_followup_stage_started = time.perf_counter()
                 context_followup_result = await self._solve_conversation_turn(problem, context)
                 self._append_perf_stage(
                     perf_stages,
-                    "forces_context_followup",
+                    "conversation_turn",
                     context_followup_stage_started,
                     recovered=bool(context_followup_result),
                 )
@@ -2470,6 +2472,10 @@ class StrandsPhysicsAgent(ABC):
 
     def _fast_mcp_tool_catalog(self) -> list[Dict[str, Any]]:
         """Compact tool catalog used by the LLM router."""
+        if self.agent_id in MECHANICS_AGENTS and getattr(self, "mcp_tool_specs", None):
+            return [{"name": spec["name"], "use_when": spec.get("description", ""),
+                     "arguments": spec.get("inputSchema", {}).get("json", {})}
+                    for spec in self.mcp_tool_specs]
         catalogs: Dict[str, list[Dict[str, Any]]] = {
             "kinematics_agent": [
                 {

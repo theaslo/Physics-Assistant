@@ -38,6 +38,16 @@ const LATEX_SNIPPETS = [
     ],
   },
   {
+    title: 'Momentum',
+    snippets: [
+      { label: 'p_i', value: 'p_i ' },
+      { label: 'p_f', value: 'p_f ' },
+      { label: '\\vec{p}', value: '\\vec{p} ' },
+      { label: '\\Delta p', value: '\\Delta p ' },
+      { label: 'J', value: 'J ' },
+    ],
+  },
+  {
     title: 'Operators',
     snippets: [
       { label: '=', value: ' = ' },
@@ -185,7 +195,7 @@ export default function ChatInput({ onSend, disabled = false }: ChatInputProps) 
         <Typography variant="body2" color="primary.dark" sx={{ display: 'block', mb: 0.75, fontWeight: 800 }}>
           Equation helper: palette
         </Typography>
-        <Box sx={{ display: 'grid', gap: 1 }}>
+        <Box sx={{ display: 'grid', gap: 1, maxHeight: { xs: '22vh', sm: 220 }, overflowY: 'auto' }}>
           {LATEX_SNIPPETS.map((group) => (
             <Box
               key={group.title}

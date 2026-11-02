@@ -16,6 +16,8 @@ from pydantic import BaseModel, Field
 import os
 
 from hitl_knowledge_transfer import KnowledgeTransferGate
+from mechanics_tutoring import solve_mechanics_turn
+from tutoring_profiles import CONVERSATION_AGENTS, MECHANICS_AGENTS
 
 # Import all Strands-based agents
 from strands_agents import (
@@ -304,7 +306,7 @@ def _extract_conversation_context(
         return None
 
     recent_messages: list[Dict[str, str]] = []
-    history_limit = 40 if agent_id == "forces_agent" else 6
+    history_limit = 40 if agent_id in CONVERSATION_AGENTS else 6
     content_limit = 12000 if agent_id == "math_agent" else 2000
     for raw_message in raw_messages[-history_limit:]:
         if not isinstance(raw_message, dict):
@@ -1818,6 +1820,20 @@ async def solve_problem(
         remediation_followup = None
         class_identifier = None
         conversation_context = _extract_conversation_context(request.context, agent_id)
+        if agent_id in MECHANICS_AGENTS:
+            agent = await get_or_create_agent(agent_id, use_direct_tools, enable_rag, rag_api_url)
+            try:
+                result = await solve_mechanics_turn(agent, knowledge_transfer_gate, request, conversation_context)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            _append_perf_stage(api_trace_stages, "mechanics_conversation", request_started)
+            metadata = result.setdefault("metadata", {})
+            metadata["performance_trace"] = _merge_performance_trace(
+                api_trace=_finalize_perf_trace("api_route", api_trace_stages, request_started),
+                agent_trace=metadata.get("performance_trace"),
+            )
+            _log_slow_trace(agent_id, request.user_id, metadata["performance_trace"])
+            return ProblemSolveResponse(**result)
         if isinstance(request.context, dict):
             kt_response = request.context.get("knowledge_transfer_response")
             remediation_followup = request.context.get("knowledge_transfer_remediation_followup")

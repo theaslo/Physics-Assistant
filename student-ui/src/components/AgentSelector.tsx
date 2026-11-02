@@ -11,7 +11,7 @@ import { useStore } from '../stores/chat-store'
 import { getAgentColor } from '../themes/uconn-theme'
 
 export default function AgentSelector() {
-  const { agents, selectedAgent, selectAgent } = useStore()
+  const { agents, selectedAgent, selectAgent, loading } = useStore()
 
   const handleChange = (agentId: string) => {
     if (agentId) {
@@ -30,6 +30,7 @@ export default function AgentSelector() {
       <FormControl fullWidth size="small">
         <InputLabel id="agent-select-label">Choose Agent</InputLabel>
         <Select
+          disabled={loading}
           labelId="agent-select-label"
           value={selectedAgent || ''}
           label="Choose Agent"
@@ -70,6 +71,7 @@ export default function AgentSelector() {
       <Box sx={{ mt: 2, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
         {agents.slice(0, 3).map((agent) => (
           <Chip
+            disabled={loading}
             key={agent.agent_id}
             label={agent.icon}
             size="small"

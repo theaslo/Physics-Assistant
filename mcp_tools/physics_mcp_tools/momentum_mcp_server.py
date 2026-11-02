@@ -4,6 +4,7 @@ import json
 import logging
 import argparse
 from mcp.server.fastmcp import FastMCP
+from physics_mcp_tools.concept_principles import register_principles
 from mcp.server.fastmcp.utilities.logging import get_logger
 
 from physics_mcp_tools.momentum_utils import (
@@ -32,6 +33,7 @@ def serve(host, port, transport):
     logger.info('Starting Momentum MCP Server')
     
     mcp = FastMCP(NAME, stateless_http=False)
+    register_principles(mcp, "momentum")
 
     def with_diagram_payload(result_text: str, payload: Dict) -> str:
         """Append machine-readable diagram payload for downstream UI rendering."""
@@ -138,7 +140,8 @@ def serve(host, port, transport):
             return f"Error in 2D momentum calculation: {str(e)}"
 
     @mcp.tool()
-    async def calculate_impulse_1d(force: float, time: float, initial_momentum: float = None, final_momentum: float = None) -> str:
+    async def calculate_impulse_1d(force: Optional[float] = None, time: Optional[float] = None,
+                                 initial_momentum: Optional[float] = None, final_momentum: Optional[float] = None) -> str:
         """
         Calculate 1D impulse using force-time or momentum change.
         
@@ -152,6 +155,14 @@ def serve(host, port, transport):
             str: Complete impulse calculation with explanation
         """
         try:
+            force_time_given = force is not None and time is not None
+            momenta_given = initial_momentum is not None and final_momentum is not None
+            if not force_time_given and not momenta_given:
+                raise ValueError("Provide both force and time, or both initial_momentum and final_momentum.")
+            if not all(math.isfinite(value) for value in (force, time, initial_momentum, final_momentum) if value is not None):
+                raise ValueError("Impulse inputs must be finite.")
+            if time is not None and time < 0:
+                raise ValueError("Time interval cannot be negative.")
             result = f"""
     1D Impulse Calculation:
     ======================
@@ -193,7 +204,7 @@ def serve(host, port, transport):
 
     """
             
-            impulse_value = impulse if "impulse" in locals() else (momentum_change if "momentum_change" in locals() else 0.0)
+            impulse_value = impulse if force_time_given else momentum_change
             result += f"""Physical Interpretation:
     - Impulse represents the change in momentum
     - Units: N⋅s (Newton-seconds) = kg⋅m/s
@@ -219,7 +230,8 @@ def serve(host, port, transport):
                     {"t_s": time, "force_n": force},
                 ],
             }
-            return with_diagram_payload(result, payload)
+            # Momentum change alone does not determine a force-time curve.
+            return with_diagram_payload(result, payload) if force_time_given else result
             
         except Exception as e:
             return f"Error in 1D impulse calculation: {str(e)}"
@@ -339,12 +351,23 @@ def serve(host, port, transport):
                         Examples: 
                         '{"mass": 2, "initial_velocity": 5, "force": 10, "time": 3}'
                         '{"mass": 1.5, "initial_momentum": 6, "impulse": 4}'
+                        '{"mass": 0.2, "initial_velocity": 5, "final_velocity": -3}'
+                        Use signed velocities for rebounds; final_velocity lets the tool calculate J = m(vf - vi).
             
         Returns:
             str: Complete analysis using momentum-impulse theorem
         """
         try:
             data = json.loads(problem_data)
+            for key in ("mass", "initial_velocity", "final_velocity", "initial_momentum", "final_momentum", "force", "time", "impulse"):
+                if key in data and (type(data[key]) not in (int, float) or not math.isfinite(data[key])):
+                    raise ValueError(f"{key} must be a finite number.")
+            if "mass" in data and data["mass"] <= 0:
+                raise ValueError("Mass must be positive.")
+            if "time" in data and data["time"] < 0:
+                raise ValueError("Time interval cannot be negative.")
+            if "mass" in data and "initial_momentum" in data and "initial_velocity" not in data:
+                data["initial_velocity"] = data["initial_momentum"] / data["mass"]
             
             result = f"""
     Momentum-Impulse Theorem Analysis:
@@ -367,7 +390,15 @@ def serve(host, port, transport):
                 pi = mass * vi
                 result += f"Initial momentum: pi = m × vi = {mass:.3f} × {vi:.3f} = {pi:.3f} kg⋅m/s\n"
                 
-                if "force" in data and "time" in data:
+                if "final_velocity" in data:
+                    vf = data["final_velocity"]
+                    pf = mass * vf
+                    impulse = pf - pi
+                    result += f"""Final momentum: pf = m × vf = {mass:.3f} × {vf:.3f} = {pf:.3f} kg⋅m/s
+    Impulse: J = pf - pi = {pf:.3f} - {pi:.3f} = {impulse:.3f} N⋅s
+    Equivalently: J = m(vf - vi) = {mass:.3f} × ({vf:.3f} - {vi:.3f}) = {impulse:.3f} N⋅s
+    """
+                elif "force" in data and "time" in data:
                     force = data["force"]
                     time = data["time"]
                     impulse = force * time
@@ -383,6 +414,10 @@ def serve(host, port, transport):
     Change in velocity: Δv = vf - vi = {vf:.3f} - {vi:.3f} = {vf - vi:.3f} m/s
     """
                     
+                elif "final_momentum" in data:
+                    pf = data["final_momentum"]
+                    impulse = pf - pi
+                    result += f"Impulse: J = pf - pi = {pf:.3f} - {pi:.3f} = {impulse:.3f} N⋅s\n"
                 elif "impulse" in data:
                     impulse = data["impulse"]
                     pf = pi + impulse
@@ -392,6 +427,13 @@ def serve(host, port, transport):
     Final momentum: pf = pi + J = {pi:.3f} + {impulse:.3f} = {pf:.3f} kg⋅m/s
     Final velocity: vf = pf / m = {pf:.3f} / {mass:.3f} = {vf:.3f} m/s
     """
+                else:
+                    raise ValueError("Provide final_velocity, impulse, or both force and time to complete this calculation.")
+            elif "initial_momentum" in data and "final_momentum" in data:
+                pi, pf = data["initial_momentum"], data["final_momentum"]
+                result += f"Impulse: J = pf - pi = {pf:.3f} - {pi:.3f} = {pf - pi:.3f} N⋅s\n"
+            else:
+                raise ValueError("Provide mass with initial_velocity (or initial_momentum), or both initial and final momentum.")
             
             result += f"""
     Physical Insights:
@@ -423,6 +465,9 @@ def serve(host, port, transport):
                         Examples:
                         '{"m1": 2, "v1i": 5, "m2": 3, "v2i": -2, "collision_type": "elastic"}'
                         '{"m1": 1, "v1i": 4, "m2": 2, "v2i": 0, "v1f": 1, "collision_type": "inelastic"}'
+                        '{"m1": 2, "v1i": 3, "m2": 1, "v2i": 0, "collision_type": "perfectly_inelastic"}'
+                        Objects sticking together REQUIRE collision_type="perfectly_inelastic".
+                        General inelastic collisions require one supplied final velocity; do not invent it.
             
         Returns:
             str: Complete 1D collision analysis with momentum conservation
@@ -434,7 +479,10 @@ def serve(host, port, transport):
             m2 = data["m2"] 
             v1i = data["v1i"]
             v2i = data["v2i"]
-            collision_type = data.get("collision_type", "unknown")
+            collision_type = data.get("collision_type", "unknown").lower().replace(" ", "_")
+            if (not all(type(value) in (int, float) and math.isfinite(value) for value in (m1, m2, v1i, v2i))
+                    or m1 <= 0 or m2 <= 0):
+                raise ValueError("Masses must be positive and masses and velocities must be finite numbers.")
             v1f: Optional[float] = None
             v2f: Optional[float] = None
             
@@ -503,6 +551,7 @@ def serve(host, port, transport):
             elif collision_type.lower() == "perfectly_inelastic":
                 # Perfectly inelastic - objects stick together
                 vf_combined = pi_total / (m1 + m2)
+                v1f = v2f = vf_combined
                 pf_total = (m1 + m2) * vf_combined
                 
                 ke_i = 0.5 * m1 * v1i**2 + 0.5 * m2 * v2i**2
@@ -523,11 +572,14 @@ def serve(host, port, transport):
     Initial KE: KEᵢ = {ke_i:.3f} J
     Final KE: KEf = {ke_f:.3f} J  
     Energy lost: ΔKE = KEᵢ - KEf = {ke_lost:.3f} J
-    Energy lost percentage: {(ke_lost/ke_i)*100:.1f}%
+    Energy lost percentage: {(ke_lost/ke_i)*100 if ke_i else 0.0:.1f}%
 
     """
                 
             elif "v1f" in data or "v2f" in data:
+                if not all(type(data[key]) in (int, float) and math.isfinite(data[key])
+                           for key in ("v1f", "v2f") if key in data):
+                    raise ValueError("Final velocities must be finite numbers.")
                 # Partially given final velocities
                 if "v1f" in data:
                     v1f = data["v1f"]
@@ -559,6 +611,8 @@ def serve(host, port, transport):
     |pᵢ - pf| = |{pi_total:.3f} - {pf_total:.3f}| = {abs(pi_total - pf_total):.6f} ≈ 0 ✓
 
     """
+            else:
+                raise ValueError('Specify elastic or perfectly_inelastic, or supply one final velocity for a general collision.')
             
             result += f"""Physical Interpretation:
     - Momentum is always conserved in isolated systems (no external forces)

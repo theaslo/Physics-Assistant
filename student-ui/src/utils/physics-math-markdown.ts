@@ -3,12 +3,17 @@ type PhysicsMathReplacement = {
   latex: string | ((match: string, ...groups: string[]) => string)
 }
 
-const PROTECTED_MARKDOWN_SEGMENT = /(```[\s\S]*?```|`[^`\n]*`|\$\$[\s\S]*?\$\$|\$[^$\n]+\$)/g
+const PROTECTED_MARKDOWN_SEGMENT = /(```[\s\S]*?```|~~~[\s\S]*?~~~|`+[^`\n]*`+|\$\$[\s\S]*?\$\$|\$[^$\n]+\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\))/g
 
 const PHYSICS_MATH_REPLACEMENTS: PhysicsMathReplacement[] = [
   { pattern: /\\frac\{[^{}]*\}\{[^{}]*\}/g, latex: (match) => match },
   { pattern: /\\sqrt\{[^{}]*\}/g, latex: (match) => match },
   { pattern: /\\(?:sin|cos)\s*\([^)]*\)/g, latex: (match) => match },
+  { pattern: /\\Delta\s*(?:\\(?:omega|theta)|[pKUEtxy])(?:_(?:\{[^{}]+\}|[a-z0-9]+))?/g, latex: (match) => match },
+  { pattern: /\\sum\s*\\tau(?:_(?:\{[^{}]+\}|[a-z0-9]+))?/g, latex: (match) => match },
+  { pattern: /\\(?:omega|alpha|theta|tau)(?:_(?:\{[^{}]+\}|[a-z0-9]+))?(?:\^(?:\{[^{}]+\}|[0-9]+))?(?![A-Za-z])/g, latex: (match) => match },
+  { pattern: /\b[A-Za-z](?:_(?:\{[^{}]+\}|[a-z0-9]+))?\^(?:\{[^{}]*\}|[0-9]+|[A-Za-z]\b)/g, latex: (match) => match },
+  { pattern: /\b[pKULIEJW]_(?:\{[^{}]+\}|[a-z0-9]+)(?:\^(?:\{[^{}]+\}|[0-9]+))?/g, latex: (match) => match },
   { pattern: /\\Delta\s*x\b/g, latex: '\\Delta x' },
   { pattern: /\bDelta\s+x\b/g, latex: '\\Delta x' },
   { pattern: /\\Delta\s*t\b/g, latex: '\\Delta t' },
@@ -17,21 +22,31 @@ const PHYSICS_MATH_REPLACEMENTS: PhysicsMathReplacement[] = [
   { pattern: /\btheta\b/g, latex: '\\theta' },
   { pattern: /\\sum\s*F\b/g, latex: '\\sum F' },
   { pattern: /\bsum\s*F\b/g, latex: '\\sum F' },
-  { pattern: /\bF_\{?net\}?\b/g, latex: 'F_{net}' },
-  { pattern: /\bf_\{?k\}?\b/g, latex: 'f_k' },
-  { pattern: /\\mu_\{?k\}?\b/g, latex: '\\mu_k' },
+  { pattern: /\bF_(?:\{net\}|net\b)/g, latex: 'F_{net}' },
+  { pattern: /\bf_(?:\{k\}|k\b)/g, latex: 'f_k' },
+  { pattern: /\\mu_(?:\{k\}|k\b)/g, latex: '\\mu_k' },
   { pattern: /\\vec\{([A-Za-z])\}/g, latex: (_match, symbol) => `\\vec{${symbol}}` },
   {
-    pattern: /\b([xv])_\{?(0x|0y|fx|fy|0|f|i|x|y)\}?(?:\^2)?\b/g,
-    latex: (match, symbol, subscript) => `${symbol}_{${subscript}}${match.endsWith('^2') ? '^2' : ''}`,
+    pattern: /\b([xv])_(?:\{(?:0x|0y|fx|fy|0|f|i|x|y)\}|(?:0x|0y|fx|fy|0|f|i|x|y)\b)(?:\^2)?/g,
+    latex: (match) => match,
   },
   { pattern: /\bt\^2\b/g, latex: 't^2' },
 ]
 
-function isProtectedMarkdownSegment(segment: string) {
-  return segment.startsWith('```') || segment.startsWith('`') || segment.startsWith('$$') || (
-    segment.startsWith('$') && segment.endsWith('$')
-  )
+function normalizeMathSegment(segment: string) {
+  // An LLM can emit a single JSON backslash: \text becomes a tab + "ext".
+  // Repair only recognizable commands inside explicit math, never prose/code.
+  const repaired = segment
+    .replace(/\t(?=(?:ext(?:bf|it|normal|rm)?|imes|heta|au)(?![A-Za-z]))/g, '\\t')
+    .replace(/\f(?=rac(?![A-Za-z]))/g, '\\f')
+    .replace(/\x08(?=(?:egin|eta|oxed|oldsymbol)(?![A-Za-z]))/g, '\\b')
+    .replace(/\r(?=(?:ight|ho)(?![A-Za-z]))/g, '\\r')
+  if (repaired.startsWith('\\[')) return `\n\n$$\n${repaired.slice(2, -2).trim()}\n$$\n\n`
+  if (repaired.startsWith('\\(')) return `$${repaired.slice(2, -2).trim()}$`
+  if (repaired.startsWith('$$') && !(repaired.startsWith('$$\n') && repaired.endsWith('\n$$'))) {
+    return `\n\n$$\n${repaired.slice(2, -2).trim()}\n$$\n\n`
+  }
+  return repaired
 }
 
 function addPhysicsMathDelimiters(segment: string) {
@@ -58,6 +73,10 @@ function addPhysicsMathDelimiters(segment: string) {
 export function formatPhysicsMathMarkdown(content: string) {
   return content
     .split(PROTECTED_MARKDOWN_SEGMENT)
-    .map((segment) => (isProtectedMarkdownSegment(segment) ? segment : addPhysicsMathDelimiters(segment)))
+    .map((segment, index) => {
+      if (index % 2 === 0) return addPhysicsMathDelimiters(segment)
+      if (segment.startsWith('`') || segment.startsWith('~~~')) return segment
+      return normalizeMathSegment(segment)
+    })
     .join('')
 }

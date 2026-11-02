@@ -57,8 +57,12 @@ class KnowledgeTransferGate:
 
         pilot_agents_raw = os.getenv("HITL_PILOT_AGENTS", "forces_agent,kinematics_agent")
         self.pilot_agents = {a.strip() for a in pilot_agents_raw.split(",") if a.strip()}
+        self.contextual_agents = {agent.strip() for agent in os.getenv(
+            "HITL_CONTEXTUAL_AGENTS", "momentum_agent"
+        ).split(",") if agent.strip()}
 
         self._pending_checks: Dict[str, Dict[str, Any]] = {}
+        self._contextual_answers: Dict[str, Dict[str, Any]] = {}
         self._question_variant_counters: Dict[str, int] = {}
         self._mcp_client: Optional[MCPClient] = None
         self._mcp_agent: Optional[Agent] = None
@@ -66,6 +70,59 @@ class KnowledgeTransferGate:
 
     def is_enabled_for(self, agent_id: str) -> bool:
         return self.enabled and agent_id in self.pilot_agents
+
+    def register_contextual_check(self, agent_id, problem, question, user_id, session_id=None, class_identifier=None):
+        """Store the generated answer key server-side, sharing attempt logging with pilot checks."""
+        now = time.time()
+        self._pending_checks = {key: value for key, value in self._pending_checks.items()
+                                if now - value["created_at"] < 3600}
+        self._contextual_answers = {key: value for key, value in self._contextual_answers.items()
+                                   if now - value["check"]["created_at"] < 3600}
+        check_id = uuid.uuid4().hex
+        check = {
+            **question, "check_id": check_id, "created_at": now,
+            "agent_id": agent_id, "problem": problem, "question_id": None,
+            "user_id": user_id, "session_id": session_id, "class_identifier": class_identifier,
+            "combined_confidence": question["confidence"], "threshold": self.threshold,
+            "rule_confidence": None, "llm_confidence": question["confidence"],
+            "reason_tags": ["contextual_llm_mcp"],
+            "correct_feedback": "Correct.", "incorrect_feedback": "Let's work through this together.",
+            "distractor_feedback": {},
+        }
+        self._pending_checks[check_id] = check
+        return {
+            **{key: check[key] for key in ("check_id", "agent_id", "concept_tag", "question_id", "question",
+                                         "options", "threshold", "reason_tags")},
+            "confidence": question["confidence"], "status": "question_required",
+        }
+
+    def take_contextual_answer(self, agent_id, check_id, selected_option_id, user_id, session_id=None):
+        receipt = self._contextual_answers.get(check_id)
+        check = receipt["check"] if receipt else self._pending_checks.get(check_id)
+        if (not check or check["agent_id"] != agent_id or check["user_id"] != user_id
+                or check["session_id"] != session_id or time.time() - check["created_at"] >= 3600):
+            raise ValueError("This check-in has expired or belongs to another conversation. Please resend your question.")
+        if selected_option_id not in {option["id"] for option in check["options"]}:
+            raise ValueError("Please select one of the check-in options.")
+        if receipt:
+            if selected_option_id != receipt["selected"]:
+                raise ValueError("This check-in was already answered. Please continue the conversation.")
+            return check, dict(receipt["result"])
+        result = self.process_answer(check_id, selected_option_id, user_id, session_id, check["class_identifier"])
+        if result is None:
+            raise ValueError("This check-in was already answered. Please resend your question.")
+        # A transient model failure can be retried without losing context or logging a second attempt.
+        self._contextual_answers[check_id] = {"check": check, "selected": selected_option_id, "result": dict(result)}
+        return check, result
+
+    def get_contextual_answer(self, agent_id, check_id, user_id, session_id=None):
+        """Resume only an answered check belonging to this student and conversation."""
+        receipt = self._contextual_answers.get(check_id)
+        check = receipt["check"] if receipt else None
+        if (not check or check["agent_id"] != agent_id or check["user_id"] != user_id
+                or check["session_id"] != session_id or time.time() - check["created_at"] >= 3600):
+            raise ValueError("This check-in has expired or belongs to another conversation. Please resend your question.")
+        return receipt
 
     def _append_trace_stage(
         self,
@@ -406,6 +463,7 @@ class KnowledgeTransferGate:
         self._mcp_client = None
         self._mcp_agent = None
         self._pending_checks.clear()
+        self._contextual_answers.clear()
 
     def _combine_confidence(self, rule_conf: float, llm_conf: Optional[float]) -> float:
         if llm_conf is None:
@@ -1155,6 +1213,8 @@ class KnowledgeTransferGate:
                 "reason_tags": check.get("reason_tags", []),
                 "rule_confidence": check.get("rule_confidence"),
                 "llm_confidence": check.get("llm_confidence"),
+                **({"question": check["question"], "options": check["options"]}
+                   if "contextual_llm_mcp" in check.get("reason_tags", []) else {}),
             },
         }
 

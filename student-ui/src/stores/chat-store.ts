@@ -677,6 +677,7 @@ interface ChatState {
   sidebarOpen: boolean
   pendingKnowledgeCheck: PendingKnowledgeCheck | null
   pendingHitlRemediation: PendingHitlRemediation | null
+  tutoringByAgent: Record<string, { check: PendingKnowledgeCheck | null; remediation: PendingHitlRemediation | null }>
 
   // Actions
   login: (user: User) => void
@@ -706,6 +707,7 @@ export const useStore = create<ChatState>()(
       sidebarOpen: true,
       pendingKnowledgeCheck: null,
       pendingHitlRemediation: null,
+      tutoringByAgent: {},
 
       // Actions
       login: (user) => set({ isAuthenticated: true, user }),
@@ -718,12 +720,21 @@ export const useStore = create<ChatState>()(
           messagesByAgent: {},
           pendingKnowledgeCheck: null,
           pendingHitlRemediation: null,
+          tutoringByAgent: {},
         }),
 
       setAgents: (agents) => set({ agents }),
 
       selectAgent: (agentId) => {
-        set({ selectedAgent: agentId, error: null })
+        const state = get()
+        if (state.loading || state.selectedAgent === agentId) return
+        const tutoringByAgent = { ...state.tutoringByAgent }
+        if (state.selectedAgent) {
+          tutoringByAgent[state.selectedAgent] = { check: state.pendingKnowledgeCheck, remediation: state.pendingHitlRemediation }
+        }
+        const pending = tutoringByAgent[agentId]
+        set({ selectedAgent: agentId, error: null, tutoringByAgent,
+          pendingKnowledgeCheck: pending?.check || null, pendingHitlRemediation: pending?.remediation || null })
       },
 
       addMessage: (message) => {
@@ -748,9 +759,12 @@ export const useStore = create<ChatState>()(
           const { messagesByAgent } = get()
           const newMessages = { ...messagesByAgent }
           delete newMessages[agentId]
-          set({ messagesByAgent: newMessages })
+          const tutoringByAgent = { ...get().tutoringByAgent }
+          delete tutoringByAgent[agentId]
+          set({ messagesByAgent: newMessages, tutoringByAgent,
+            ...(agentId === get().selectedAgent ? { pendingKnowledgeCheck: null, pendingHitlRemediation: null } : {}) })
         } else {
-          set({ messagesByAgent: {} })
+          set({ messagesByAgent: {}, tutoringByAgent: {}, pendingKnowledgeCheck: null, pendingHitlRemediation: null })
         }
       },
 
