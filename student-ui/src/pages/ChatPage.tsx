@@ -2,6 +2,10 @@ import { useEffect, useCallback, useState } from 'react'
 import {
   Box,
   Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Drawer,
   AppBar,
   Toolbar,
@@ -82,6 +86,7 @@ export default function ChatPage() {
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('md'))
   const [isKnowledgeCheckProcessing, setIsKnowledgeCheckProcessing] = useState(false)
+  const [examplesAgentId, setExamplesAgentId] = useState<string | null>(null)
 
   const {
     user,
@@ -168,7 +173,8 @@ export default function ChatPage() {
 
   // Handle sending messages
   const handleSendMessage = useCallback(
-    async (message: string, drawing?: StudentDrawing) => {
+    async (message: string, drawing?: StudentDrawing, newProblem = false) => {
+      if (loading) return
       const trimmedMessage = message.trim()
       const hasDrawing = Boolean(drawing)
       if (!trimmedMessage && !hasDrawing) return
@@ -176,14 +182,14 @@ export default function ChatPage() {
         setError('Complete the knowledge check before sending a new prompt.')
         return
       }
-      const remediationFollowUp = pendingHitlRemediation ? pendingHitlRemediation : null
+      const remediationFollowUp = !newProblem && pendingHitlRemediation ? pendingHitlRemediation : null
       const agentForMessage = remediationFollowUp?.agentId || selectedAgent
       const drawingAnalysisPayload = serializeDrawingForAnalysis(drawing)
       if (!agentForMessage) {
         setError('Select a physics agent before sending a message.')
         return
       }
-      const conversationContext = buildConversationContext(messages, agentForMessage)
+      const conversationContext = newProblem ? undefined : buildConversationContext(messages, agentForMessage)
 
       // Add user message
       const userMessage = {
@@ -308,6 +314,7 @@ export default function ChatPage() {
       selectedAgent,
       user,
       messages,
+      loading,
       pendingKnowledgeCheck,
       pendingHitlRemediation,
       addMessage,
@@ -318,6 +325,11 @@ export default function ChatPage() {
       setPendingHitlRemediation,
     ]
   )
+
+  const handleExampleClick = (question: string) => {
+    setExamplesAgentId(null)
+    void handleSendMessage(question, undefined, true)
+  }
 
   const handleKnowledgeCheckSelection = useCallback(
     async (selectedOptionId: string) => {
@@ -545,9 +557,25 @@ export default function ChatPage() {
             </Box>
           ) : (
             <>
-              {/* Welcome message if no messages yet */}
-              {messages.length === 0 && selectedAgentInfo && (
-                <WelcomeMessage agent={selectedAgentInfo} onExampleClick={handleSendMessage} />
+              {selectedAgentInfo && (
+                <>
+                  {messages.length > 0 && (
+                    <Button
+                      variant="outlined"
+                      aria-haspopup="dialog"
+                      onClick={() => setExamplesAgentId(selectedAgent)}
+                      sx={{ alignSelf: 'flex-start', mb: 2 }}
+                    >
+                      Back to example problems
+                    </Button>
+                  )}
+                  {messages.length === 0 && (
+                    <WelcomeMessage
+                      agent={selectedAgentInfo}
+                      onExampleClick={loading || pendingKnowledgeCheck ? undefined : handleExampleClick}
+                    />
+                  )}
+                </>
               )}
 
               {/* Chat messages */}
@@ -626,6 +654,29 @@ export default function ChatPage() {
           <ChatInput onSend={handleSendMessage} disabled={loading || Boolean(pendingKnowledgeCheck)} />
         )}
       </Box>
+
+      <Dialog
+        open={Boolean(selectedAgentInfo && examplesAgentId === selectedAgent)}
+        onClose={() => setExamplesAgentId(null)}
+        fullScreen={isMobile}
+        fullWidth
+        maxWidth="md"
+        scroll="paper"
+        aria-labelledby="example-problems-title"
+      >
+        <DialogTitle id="example-problems-title">Example problems</DialogTitle>
+        <DialogContent dividers>
+          {selectedAgentInfo && (
+            <WelcomeMessage
+              agent={selectedAgentInfo}
+              onExampleClick={loading || pendingKnowledgeCheck ? undefined : handleExampleClick}
+            />
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setExamplesAgentId(null)}>Return to conversation</Button>
+        </DialogActions>
+      </Dialog>
 
       <Drawer
         anchor={isMobile ? 'bottom' : 'right'}
