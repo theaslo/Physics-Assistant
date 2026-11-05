@@ -64,13 +64,32 @@ Check the premise of your question against physics. Zero NET force does not mean
 """
 
 
+class ClarificationRequest(str):
+    """A verified request for missing givens, rather than a numerical result."""
+
+
+class MissingGivens(Exception):
+    def __init__(self, question, tools_used):
+        super().__init__(question)
+        self.tools_used = list(dict.fromkeys(tools_used))
+
+
 class ConversationPhysicsAgent(StrandsPhysicsAgent):
     tutoring_guidance = ""
-    check_in_guidance = ""
+    check_in_guidance = """
+For a multiple-choice check-in, ask which physical principle or system assumption
+applies to the given situation. Do not offer equivalent general and special
+forms of an equation as competing options. Exactly one option must be correct
+under the stated conditions; do not supply the final numerical result. Keep
+MCP, tool names, tool selection and internal verification out of student text.
+"""
     worked_solution_required = False
+    verify_numerical_completeness = False
 
     async def prepare_contextual_check(self, question, context):
         """Let the model choose a relevant conceptual check, never a generic question bank."""
+        if (context or {}).get("full_solution_requested"):
+            return None
         # A direct explanation should not become a quiz merely because it names
         # a different physical setup from the previous turn.
         if (re.search(r"(?:^|[.!?]\s+)(?:why|is|are|does|do|can|would|could|should|explain)\b", question, re.I)
@@ -143,10 +162,43 @@ class ConversationPhysicsAgent(StrandsPhysicsAgent):
                 or type(check.get("confidence")) not in (int, float) or not 0 <= check["confidence"] <= 1):
             raise RuntimeError("The tutor could not validate the check-in. Please try again.")
         check["options"] = [{"id": o["id"], "text": o["text"]} for o in options]
+        if self._mentions_internal_tools(check["question"] + "\n" + "\n".join(o["text"] for o in options)):
+            raise RuntimeError("The tutor could not prepare a student-facing check-in. Please try again.")
         return check
 
     async def _review_contextual_check(self, question, check, evidence):
-        return check
+        for attempt in range(2):
+            review = await self._reflection_model(
+                json.dumps({"original_problem": question, "check": check}),
+                "Independently review this multiple-choice physics check against the original problem and verified principles. "
+                "Return JSON with correct_option_ids (array of ALL physically correct option IDs) and issue (string). "
+                "Evaluate EVERY option, not just the supplied answer key. General and special forms of the same "
+                "conservation equation can both be valid. No option may require unstated assumptions or invented inputs. "
+                "Every option must answer the same precise quantity or decision asked in the question. "
+                "Reject mixed referents (for example work BY versus work ON the system in different choices), "
+                "or an abstract definition that fails to refer to the original physical setup. "
+                "Set correct_option_ids=[] if the question is ambiguous.\n" + self.tutoring_guidance
+                + "\nVerified principles:\n" + evidence,
+                tokens=400,
+            )
+            if review.get("correct_option_ids") == [check["correct_option_id"]]:
+                return check
+            if attempt == 0:
+                check = await self._reflection_model(
+                    json.dumps({"original_problem": question, "rejected_check": check, "review": review}),
+                    "Rewrite the check to remove ambiguity and have exactly ONE correct option. "
+                    "If several listed laws are valid, the QUESTION is too broad: replace it with a NEW narrow question "
+                    "about one sign, process condition, or system assumption. Do not reuse the rejected question or options. "
+                    "All distractors must be physically false under the stated conditions, not merely less specific. "
+                    "Ask about the physical principle or system assumption for the original setup, not equations or arithmetic. "
+                    "Return JSON with needs_check=true, confidence (0 to 1), concept_tag, question, "
+                    "options (3 or 4 objects with id and text), and correct_option_id. "
+                    "Do not reveal the final answer.\n" + self.check_in_guidance + self.tutoring_guidance
+                    + "\nVerified principles:\n" + evidence,
+                    tokens=900,
+                )
+                check = self._validate_contextual_check(check)
+        raise RuntimeError("The tutor could not prepare an unambiguous check-in. Please try again.")
 
     @property
     def principles_tool(self):
@@ -163,6 +215,14 @@ class ConversationPhysicsAgent(StrandsPhysicsAgent):
     async def _solve_conversation_turn(
         self, problem: str, context: Optional[Dict[str, Any]]
     ) -> Dict[str, Any]:
+        try:
+            return await self._run_conversation_turn(problem, context)
+        except MissingGivens as clarification:
+            return {"solution": str(clarification), "tools_used": clarification.tools_used, "diagram": None}
+
+    async def _run_conversation_turn(
+        self, problem: str, context: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
         """Let the model select the active problem without keyword-based answer fallbacks."""
         question = self._current_followup_text(problem, context)
         history = self._conversation_context_text(problem, context, include_current=False)
@@ -173,17 +233,54 @@ class ConversationPhysicsAgent(StrandsPhysicsAgent):
         catalog = [tool for tool in self._fast_mcp_tool_catalog() if tool["name"] != self.principles_tool]
         tools_used = []
         tool_outputs = []
+        completed_requests = []
         diagrams = []
 
         async def call_tool(name: str, arguments: Dict[str, Any]) -> None:
+            requested = {"tool": name, "arguments": arguments}
             result = await asyncio.wait_for(
                 asyncio.to_thread(self._call_mcp_tool_direct, name, arguments),
                 timeout=self.fast_mcp_explain_timeout_seconds,
             )
             output = self._extract_text_from_mcp_tool_result(result)
+            if (self.verify_numerical_completeness and name != self.principles_tool
+                    and output and (self._is_mcp_error_text(output) or result.get("status") == "error")):
+                repair = await self._reflection_model(
+                    json.dumps({"current_question": question, "history": history,
+                                "rejected_call": {"tool_name": name, "arguments": arguments},
+                                "validation_error": output,
+                                "completed_calculations": tool_outputs[1:]}),
+                    "Repair the argument contract for this rejected calculation, using only the original givens "
+                    "and completed calculations. Return JSON with tool_calls, containing ONE corrected call to the SAME tool. "
+                    "Do not invent inputs or alter given physical quantities. For a genuinely unknown JSON field, "
+                    "omit it or use null; never insert a placeholder zero or guessed result. Actual given zero heat, "
+                    "work or temperature changes must remain zero. If genuinely required givens are missing, "
+                    "return tool_calls=[] and clarification_question as ONE question asking for them. An unknown "
+                    "that can be calculated from the supplied data is not a missing given. If supplied values are "
+                    "invalid and no clarification is possible, return tool_calls=[]. "
+                    "Do not answer the student or treat a failed call as verification.\nCatalog:\n"
+                    + json.dumps([tool for tool in catalog if tool["name"] == name]),
+                    tokens=700,
+                )
+                corrected_calls = self._extract_fast_mcp_tool_calls(repair, catalog)
+                clarification = repair.get("clarification_question")
+                if (repair.get("tool_calls") == [] and isinstance(clarification, str) and "?" in clarification
+                        and not self._mentions_internal_tools(clarification)
+                        and not self._has_new_numbers(clarification, question + "\n" + history)):
+                    raise MissingGivens(self._one_question(clarification), tools_used)
+                if (len(corrected_calls) == 1 and corrected_calls[0]["tool_name"] == name
+                        and corrected_calls[0]["arguments"] != arguments
+                        and not self._calculation_input_error(corrected_calls[0])):
+                    arguments = corrected_calls[0]["arguments"]
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(self._call_mcp_tool_direct, name, arguments),
+                        timeout=self.fast_mcp_explain_timeout_seconds,
+                    )
+                    output = self._extract_text_from_mcp_tool_result(result)
             if not output or self._is_mcp_error_text(output) or result.get("status") == "error":
-                raise RuntimeError(f"The {name} tool could not verify this question. Please try again.")
+                raise RuntimeError("The tutor could not verify this calculation. Please check the given quantities and try again.")
             tools_used.append(name)
+            completed_requests.append(requested)
             tool_outputs.append({"tool": name, "arguments": arguments, "result": self._strip_embedded_diagram_json(output)})
             diagram = self._extract_diagram_from_text(output)
             if diagram:
@@ -288,13 +385,51 @@ class ConversationPhysicsAgent(StrandsPhysicsAgent):
                 raise RuntimeError("The tutor could not interpret this question. Please try again.")
             calls = self._extract_fast_mcp_tool_calls(parsed, catalog)
             if calls:
-                for call in calls:
-                    await call_tool(call["tool_name"], call["arguments"])
-                continue
+                fresh_calls = [call for call in calls if not any(
+                    self._same_calculation(output, call) for output in tool_outputs + completed_requests
+                )]
+                if fresh_calls:
+                    for call in fresh_calls:
+                        if not any(self._same_calculation(output, call) for output in tool_outputs + completed_requests):
+                            await call_tool(call["tool_name"], call["arguments"])
+                    continue
+                # A repeated request is not another physics step. Ask for the
+                # completed explanation using the existing calculation evidence.
+                worked = await self._reflection_model(
+                    json.dumps({"current_question": question, "history": history, "verified_results": tool_outputs}),
+                    "The requested calculations have already been executed. Do not request them again. "
+                    "Write the complete worked solution using only those results. Return JSON with nonempty "
+                    "string fields givens, principle, equation, substitution, result, and check. "
+                    "Cover every requested part. Insert numerical givens in substitution. Use raw LaTeX "
+                    "without dollar delimiters for equation and substitution. Keep tool names and internal "
+                    "verification out of the explanation.\n" + MATH_FORMATTING_GUIDANCE,
+                    tokens=1200,
+                )
+                parsed = {"answer": worked.get("result", ""), "worked_solution": worked, "tool_calls": [],
+                          "show_diagram": parsed.get("show_diagram")}
             answer = parsed.get("answer")
             if (parsed.get("tool_calls") or not isinstance(answer, str)
                     or (not answer.strip() and not isinstance(parsed.get("worked_solution"), dict))):
                 raise RuntimeError("The tutor could not verify an answer to this question. Please try again.")
+            if self.verify_numerical_completeness and len(tool_outputs) == 1 and "?" in answer:
+                clarification = await self._reflection_model(
+                    json.dumps({"current_question": question, "history": history, "draft_question": answer}),
+                    "Check only whether the ORIGINAL task genuinely lacks necessary information. Do not plan tools "
+                    "or calculate. Return JSON with needs_clarification (boolean) and question (string). "
+                    "Set true when a numerical answer needs a quantity that was not given and cannot be derived, "
+                    "such as moment of inertia when only angular velocity is known. Ask ONE targeted question "
+                    "for that missing quantity, ending in '?'. Set false for a conceptual question, or when the "
+                    "requested unknown can be calculated from the supplied data. Do not require mass when it "
+                    "cancels from a speed calculation. Do not invent input values.\nVerified physics:\n"
+                    + tool_outputs[0]["result"],
+                    tokens=500,
+                )
+                if clarification.get("needs_clarification") is True or clarification.get("task_type") == "clarification":
+                    followup = clarification.get("question") or clarification.get("corrected_answer") or answer
+                    if (isinstance(followup, str) and "?" in followup and not self._mentions_internal_tools(followup)
+                            and not self._has_new_numbers(followup, question + "\n" + history)):
+                        return {"solution": self._one_question(followup), "tools_used": list(dict.fromkeys(tools_used)), "diagram": None}
+            corrected_answer = None
             if len(tool_outputs) == 1:
                 # A prose answer is not proof that a numerical check was done.
                 # Independently check tool selection before accepting an answer
@@ -307,11 +442,36 @@ class ConversationPhysicsAgent(StrandsPhysicsAgent):
                     continue
                 if corrected_answer:
                     answer = corrected_answer
+            elif self.verify_numerical_completeness:
+                completed_before = len(tool_outputs)
+                corrected_answer = await self._verify_reflection_calculations(
+                    {"problem": history, "question_to_answer": question,
+                     "draft_answer": parsed.get("worked_solution") or answer},
+                    catalog, tool_outputs, call_tool,
+                )
+                if len(tool_outputs) > completed_before:
+                    continue
+                if corrected_answer:
+                    answer = corrected_answer
+                    # Rebuild all worked sections together when the numerical
+                    # draft omitted a requested part; don't retain partial work.
+                    parsed["worked_solution"] = None
+            if isinstance(corrected_answer, ClarificationRequest):
+                return {"solution": str(corrected_answer), "tools_used": list(dict.fromkeys(tools_used)), "diagram": None}
             if self.worked_solution_required and len(tool_outputs) > 1:
                 worked = parsed.get("worked_solution")
+                if isinstance(worked, dict):
+                    worked = self._ground_worked_solution(worked, tool_outputs)
                 fields = ("givens", "principle", "equation", "substitution", "result", "check")
                 def valid_worked(value):
                     if not isinstance(value, dict) or not all(isinstance(value.get(key), str) and value[key].strip() for key in fields):
+                        return False
+                    if any("$" in value[key] for key in ("equation", "substitution")):
+                        return False
+                    substitution = re.sub(r"\\(?:d?frac|tfrac)\s*\{?1\}?\s*\{?2\}?", "", value["substitution"])
+                    substitution = re.sub(r"\^(?:\{[^}]*\}|[-+]?\d+)", "", substitution)
+                    substitution = re.sub(r"(?<![\d.])(?:0?\.5|1\s*/\s*2)(?![\d.])", "", substitution)
+                    if not re.search(r"\d", substitution):
                         return False
                     content = "\n".join(value[key] for key in fields)
                     return (not re.search(r"\b(?:MCP|numerical tools?|calculation tools?|tool outputs?|tool results?|verified results?)\b", content, re.I)
@@ -324,14 +484,17 @@ class ConversationPhysicsAgent(StrandsPhysicsAgent):
                         "Return JSON with nonempty string fields givens, principle, equation, substitution, result, and check. "
                         "equation and substitution must be raw LaTeX equations without dollar delimiters. "
                         "result must include units and direction when relevant. Complete all requested verification. "
+                        "Substitution MUST insert the actual numerical givens and computed values, not repeat symbolic formulas. "
+                        "Do not include dollar delimiters inside equation or substitution. "
                         "Use physics language only. Never mention MCP, tools, tool names, verified results, or internal implementation. "
                         "check must discuss physical units, direction, assumptions, or conservation. "
                         "Do not ask permission to finish or introduce unverified calculations.\n" + MATH_FORMATTING_GUIDANCE,
                         tokens=1200,
                     )
+                    if isinstance(worked, dict):
+                        worked = self._ground_worked_solution(worked, tool_outputs)
                 if not valid_worked(worked):
                     raise RuntimeError("The tutor could not finish the worked solution. Please try again.")
-                worked = self._ground_worked_solution(worked, tool_outputs)
                 sections = []
                 for key, title in zip(fields, ("Given", "Principle", "Equation", "Substitution", "Result", "Check")):
                     value = worked[key].strip()
@@ -363,10 +526,34 @@ class ConversationPhysicsAgent(StrandsPhysicsAgent):
         raise RuntimeError("This calculation needs more steps than the tutor could complete. Please try a smaller step.")
 
     def _conversation_answer_error(self, answer, *, numerical_verified=False):
+        if self._mentions_internal_tools(answer):
+            return "Use physics language only. Remove MCP, tool names and internal verification details from the student-facing explanation."
         return None
+
+    def _mentions_internal_tools(self, text):
+        if re.search(r"\bMCP\b|\btool_(?:calls|outputs|used)\b|\bnumerical tools?\b|\bverified results?\b", text, re.I):
+            return True
+        names = [self.principles_tool] + [tool["name"] for tool in getattr(self, "mcp_tool_specs", [])]
+        return any(re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", text) for name in names)
 
     def _ground_worked_solution(self, worked, tool_outputs):
         return worked
+
+    @staticmethod
+    def _same_calculation(output, call):
+        def normalized(value):
+            if isinstance(value, str):
+                try:
+                    return normalized(json.loads(value))
+                except (ValueError, TypeError):
+                    return value
+            if isinstance(value, dict):
+                return {key: normalized(item) for key, item in value.items()}
+            if isinstance(value, list):
+                return [normalized(item) for item in value]
+            return value
+        return (output["tool"] == call["tool_name"]
+                and normalized(output["arguments"]) == normalized(call["arguments"]))
 
     @staticmethod
     def _has_student_evidence(quotes, work):
@@ -658,6 +845,25 @@ class ConversationPhysicsAgent(StrandsPhysicsAgent):
         if (action == "feedback" and verdict == "correct" and feedback.get("complete") is True
                 and has_evidence and len(" ".join(corrected_work).split()) > 2):
             return "Correct. You have answered this question and explained your reasoning.", "complete"
+        if self.agent_id in MECHANICS_AGENTS and verdict == "unclear":
+            previous_question = last_tutor.rsplit("\n\n", 1)[-1]
+            def normalize(text):
+                if not isinstance(text, str) or not text.strip():
+                    return ""
+                return " ".join(re.findall(r"\w+", self._one_question(text).casefold()))
+            if normalize(feedback.get("question")) == normalize(previous_question):
+                smaller = await self._reflection_model(
+                    json.dumps({"original_problem": problem, "unanswered_question": previous_question,
+                                "student_reply": question}),
+                    "The student is lost and could not answer this tutor question. Ask ONE simpler prerequisite "
+                    "about a stated given, transfer direction, or system condition. Do not repeat or paraphrase "
+                    "the unanswered question. Do not supply the final result or invent quantities. Return JSON "
+                    "with question, ending in '?'.\n" + self.tutoring_guidance + "\nVerified physics:\n" + physics,
+                    tokens=500,
+                )
+                if normalize(smaller.get("question")) == normalize(previous_question):
+                    raise RuntimeError("The tutor could not prepare a smaller hint. Please try again.")
+                feedback["question"] = self._one_question(smaller.get("question"))
         if self.agent_id in MECHANICS_AGENTS and not str(feedback.get("question") or "").strip():
             next_step = await self._reflection_model(
                 json.dumps({"original_problem": problem, "last_tutor_question": last_tutor,
@@ -754,8 +960,21 @@ class ConversationPhysicsAgent(StrandsPhysicsAgent):
                 "FIRST classify question_to_answer as task_type: numerical or conceptual. "
                 "Finding or checking a numerical value, including a worked solution, is numerical even if the draft already contains correct arithmetic. "
                 "Explaining why, discussing assumptions/directions, or choosing a symbolic equation is conceptual. "
-                "Return ONLY a JSON object with task_type, tool_calls (array), and corrected_answer (string, empty if no correction is needed). "
+                + ("Classify the ORIGINAL requested task, not the wording of draft_answer. If genuinely necessary "
+                   "givens are absent from a numerical problem, task_type MUST be clarification: return tool_calls=[] "
+                   "and corrected_answer as ONE targeted question asking for the missing information. "
+                   "A draft that only explains that a quantity was not provided is incomplete: turn it into a question. "
+                   "Do not fabricate numerical inputs or require a calculation before asking for missing givens. "
+                   "An unknown that CAN be solved from the supplied data is not missing information; "
+                   "mass is not needed for free-fall speed when it cancels from the equation. "
+                   if self.verify_numerical_completeness else "")
+                + "Return ONLY a JSON object with task_type, tool_calls (array), and corrected_answer (string, empty if no correction is needed). "
                 "For task_type=numerical, you MUST select a calculation tool unless an applicable completed calculation is listed. "
+                "Check EVERY quantity requested in question_to_answer. One completed calculation does not verify "
+                "a different requested quantity: for example pressure-volume work does not itself calculate Delta U. "
+                "Select the additional tools needed for any uncomputed part, using only givens and completed results. "
+                "If all calculations are completed but the draft omits a requested result or physical explanation, "
+                "put the COMPLETE answer covering every requested part in corrected_answer, with no new arithmetic. "
                 "A draft result is NEVER a completed calculation. Do not repair a numerical draft in place of selecting a tool. "
                 "Check the draft against the Verified conceptual MCP reference and for internal contradictions. "
                 "When no calculation is needed but the draft contradicts that reference or itself, put a complete, concise corrected explanation in corrected_answer. "
@@ -786,6 +1005,13 @@ class ConversationPhysicsAgent(StrandsPhysicsAgent):
             if not isinstance(parsed.get("tool_calls"), list):
                 correction = '\nYour previous result omitted the tool_calls array. Return tool_calls: [] for a conceptual explanation; otherwise supply valid catalog calls. Put any corrected draft in corrected_answer, not prose outside JSON.'
                 continue
+            if parsed.get("task_type") == "clarification" and self.verify_numerical_completeness:
+                question = parsed.get("corrected_answer")
+                if (parsed["tool_calls"] or not isinstance(question, str) or "?" not in question
+                        or self._mentions_internal_tools(question)):
+                    correction = "\nA clarification must ask one student-facing question for missing givens, with tool_calls=[]."
+                    continue
+                return ClarificationRequest(self._one_question(question))
             if parsed.get("task_type") not in {"conceptual", "numerical"}:
                 correction = "\nClassify the CURRENT request with task_type='conceptual' or 'numerical' and include tool_calls and corrected_answer."
                 continue
@@ -809,7 +1035,7 @@ class ConversationPhysicsAgent(StrandsPhysicsAgent):
             correction = ""
             fresh_calls = [
                 call for call in calls
-                if not any(output["tool"] == call["tool_name"] and output["arguments"] == call["arguments"]
+                if not any(self._same_calculation(output, call)
                            for output in tool_outputs)
             ]
             if not fresh_calls:

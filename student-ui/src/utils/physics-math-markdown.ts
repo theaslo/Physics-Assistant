@@ -6,14 +6,15 @@ type PhysicsMathReplacement = {
 const PROTECTED_MARKDOWN_SEGMENT = /(```[\s\S]*?```|~~~[\s\S]*?~~~|`+[^`\n]*`+|\$\$[\s\S]*?\$\$|\$[^$\n]+\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\))/g
 
 const PHYSICS_MATH_REPLACEMENTS: PhysicsMathReplacement[] = [
+  { pattern: /[+-]?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\s*(?:\\[,;!]\s*)?\\(?:text|mathrm)\{[^{}\n]+\}/g, latex: (match) => match },
   { pattern: /\\frac\{[^{}]*\}\{[^{}]*\}/g, latex: (match) => match },
   { pattern: /\\sqrt\{[^{}]*\}/g, latex: (match) => match },
   { pattern: /\\(?:sin|cos)\s*\([^)]*\)/g, latex: (match) => match },
-  { pattern: /\\Delta\s*(?:\\(?:omega|theta)|[pKUEtxy])(?:_(?:\{[^{}]+\}|[a-z0-9]+))?/g, latex: (match) => match },
+  { pattern: /\\Delta\s*(?:\\(?:omega|theta)|[pKUETtxy])(?:_(?:\{[^{}]+\}|[a-z0-9]+))?/g, latex: (match) => match },
   { pattern: /\\sum\s*\\tau(?:_(?:\{[^{}]+\}|[a-z0-9]+))?/g, latex: (match) => match },
-  { pattern: /\\(?:omega|alpha|theta|tau)(?:_(?:\{[^{}]+\}|[a-z0-9]+))?(?:\^(?:\{[^{}]+\}|[0-9]+))?(?![A-Za-z])/g, latex: (match) => match },
+  { pattern: /\\(?:omega|alpha|theta|tau|eta)(?:_(?:\{[^{}]+\}|[a-z0-9]+))?(?:\^(?:\{[^{}]+\}|[0-9]+))?(?![A-Za-z])/g, latex: (match) => match },
   { pattern: /\b[A-Za-z](?:_(?:\{[^{}]+\}|[a-z0-9]+))?\^(?:\{[^{}]*\}|[0-9]+|[A-Za-z]\b)/g, latex: (match) => match },
-  { pattern: /\b[pKULIEJW]_(?:\{[^{}]+\}|[a-z0-9]+)(?:\^(?:\{[^{}]+\}|[0-9]+))?/g, latex: (match) => match },
+  { pattern: /\b[pKULIEJWT]_(?:\{[^{}]+\}|[a-z0-9]+)(?:\^(?:\{[^{}]+\}|[0-9]+))?/g, latex: (match) => match },
   { pattern: /\\Delta\s*x\b/g, latex: '\\Delta x' },
   { pattern: /\bDelta\s+x\b/g, latex: '\\Delta x' },
   { pattern: /\\Delta\s*t\b/g, latex: '\\Delta t' },

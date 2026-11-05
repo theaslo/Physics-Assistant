@@ -38,6 +38,23 @@ PRINCIPLES = {
         "State the system, reference level, endpoints, and assumptions before applying conservation. "
         "Use numerical MCP tools to calculate numbers."
     ),
+    "thermodynamics": (
+        "State the system and sign convention. Delta U = Q - W_by: Q is positive into the system, "
+        "W_by is positive for work by the system. Work on the system is -W_by. Internal energy is a "
+        "state function; heat and work are energy transfers and depend on the path. For boundary work, "
+        "W_by = integral(P_external dV); P Delta V requires constant external pressure. "
+        "For an ideal gas PV = nRT, absolute temperatures must be in kelvin: T_K = T_C + 273.15. "
+        "At constant ideal-gas temperature Delta U = 0; heat need not be zero. Adiabatic means Q = 0, "
+        "not constant temperature. Constant volume means zero boundary work, not zero heat. "
+        "For sensible heating with no phase change Q = mc Delta T. A temperature change has the same "
+        "numerical value in K and degrees Celsius; absolute temperatures do not. During a phase change "
+        "use latent heat rather than mc Delta T alone. Energy is conserved; heat flows spontaneously "
+        "from hotter to colder bodies. An isolated system's entropy cannot decrease. "
+        "A Carnot engine's maximum efficiency is 1 - T_c/T_h, with T_h > T_c > 0 in kelvin. "
+        "Real engines cannot exceed that bound. Distinguish efficiency from refrigerator COP. "
+        "Do not invent gas amounts, material properties, reservoir temperatures, or a process. "
+        "Use numerical MCP tools to calculate numbers."
+    ),
     "angular_motion": (
         "For constant angular acceleration: omega_f = omega_i + alpha t, "
         "Delta theta = omega_i t + (1/2) alpha t^2, omega_f^2 = omega_i^2 + 2 alpha Delta theta. "

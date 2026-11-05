@@ -4,6 +4,8 @@ import json
 import logging
 import argparse
 from mcp.server.fastmcp import FastMCP
+from physics_mcp_tools.concept_principles import register_principles
+from physics_mcp_tools.input_validation import data_object, number
 from mcp.server.fastmcp.utilities.logging import get_logger#
 
 # Initialize FastMCP server
@@ -32,6 +34,7 @@ def serve(host, port, transport):
     logger.info('Starting Energy MCP Server')
     
     mcp = FastMCP(NAME, stateless_http=False)
+    register_principles(mcp, "energy")
 
     def with_diagram_payload(result_text: str, payload: Dict) -> str:
         """Append machine-readable diagram payload for downstream UI rendering."""
@@ -75,7 +78,7 @@ def serve(host, port, transport):
     - Kinetic energy: {ke:.3f} J (Joules)
     - Energy due to motion of the object
     - Depends on both mass and velocity (velocity squared!)
-    - Always positive (energy is a scalar quantity)
+    - Nonnegative; zero when the object is at rest
     - Represents the work needed to accelerate the object from rest
 
     Key Concepts:
@@ -140,9 +143,9 @@ def serve(host, port, transport):
 
     Reference Level Analysis:
     - Current reference: {reference_level}
-    - If dropped from this height: gains {pe:.3f} J of kinetic energy
-    - Impact velocity (if dropped): v = √(2gh) = {math.sqrt(2*gravity*height):.2f} m/s
-    - Work required to lift object: W = {pe:.3f} J
+    - Changes in potential energy depend on endpoint height differences
+    - A negative height means below the chosen reference, not negative kinetic energy
+    - Falling motion needs initial/final heights and initial motion, not an absolute PE alone
 
     Applications:
     - Hydroelectric power: water at height stores energy
@@ -197,7 +200,7 @@ def serve(host, port, transport):
     Physical Interpretation:
     - Elastic potential energy: {pe_elastic:.3f} J
     - Energy stored in deformed spring/elastic material
-    - Always positive (independent of stretch/compression direction)
+    - Nonnegative (independent of stretch/compression direction)
     - Energy available when spring returns to equilibrium
     - Maximum when displacement is maximum, zero at equilibrium
 
@@ -240,6 +243,8 @@ def serve(host, port, transport):
             str: Complete work calculation with explanation
         """
         try:
+            if force_type.lower() == "variable":
+                return "Error: A variable force requires its force-displacement function or graph; Fd cos(theta) assumes constant force"
             work = calculate_work(force, displacement, angle_degrees)
             
             # Calculate parallel and perpendicular components
@@ -271,7 +276,7 @@ def serve(host, port, transport):
     - Work done: {work:.3f} J
     - {'Positive work: energy added to system' if work > 0 else 'Negative work: energy removed from system' if work < 0 else 'Zero work: no energy transfer'}
     - Energy transferred to/from the object
-    - Work equals change in kinetic energy (work-energy theorem)
+    - Net work by all forces equals the change in kinetic energy
 
     Angle Analysis:
     - θ = 0°: Maximum positive work (force helps motion)
@@ -288,7 +293,7 @@ def serve(host, port, transport):
 
     Applications:
     - Lifting objects against gravity: W = mgh
-    - Friction work: always negative (removes energy)
+    - Kinetic friction against sliding typically does negative work on the object
     - Engine work: positive (adds kinetic energy to vehicle)
     - Braking work: negative (removes kinetic energy)
     """
@@ -328,7 +333,14 @@ def serve(host, port, transport):
             str: Complete work-energy theorem analysis
         """
         try:
-            data = json.loads(problem_data)
+            data = data_object(problem_data)
+            data["mass"] = number(data, "mass", positive=True)
+            data["initial_velocity"] = number(data, "initial_velocity")
+            if not ("final_velocity" in data or "work_done" in data or {"force", "displacement"} <= data.keys()):
+                return "Error: Provide final_velocity, net work_done, or force and displacement"
+            for key in ("final_velocity", "work_done", "force", "displacement", "angle"):
+                if key in data:
+                    data[key] = number(data, key)
             
             result = f"""
     Work-Energy Theorem Analysis:
@@ -386,7 +398,9 @@ def serve(host, port, transport):
                 elif "work_done" in data:
                     work_net = data["work_done"]
                     ke_f = ke_i + work_net
-                    vf = math.sqrt(2 * ke_f / mass) if ke_f >= 0 else 0
+                    if ke_f < 0:
+                        return "Error: The supplied net work would require negative kinetic energy; the stated motion cannot continue through that displacement"
+                    vf = math.sqrt(2 * ke_f / mass)
                     
                     result += f"\nUsing W_net = ΔKE:\n"
                     result += f"Final kinetic energy: KE_f = KE_i + W_net = {ke_i:.3f} + {work_net:.3f} = {ke_f:.3f} J\n"
@@ -410,7 +424,9 @@ def serve(host, port, transport):
                     angle = data.get("angle", 0)
                     work_net = calculate_work(force, displacement, angle)
                     ke_f = ke_i + work_net
-                    vf = math.sqrt(2 * ke_f / mass) if ke_f >= 0 else 0
+                    if ke_f < 0:
+                        return "Error: The supplied net work would require negative kinetic energy; the stated motion cannot continue through that displacement"
+                    vf = math.sqrt(2 * ke_f / mass)
                     
                     result += f"\nWork by force: W = Fd cos(θ) = {force}×{displacement}×cos({angle}°) = {work_net:.3f} J\n"
                     result += f"Final kinetic energy: KE_f = KE_i + W = {ke_i:.3f} + {work_net:.3f} = {ke_f:.3f} J\n"
@@ -483,7 +499,23 @@ def serve(host, port, transport):
             str: Complete energy conservation analysis
         """
         try:
-            data = json.loads(system_data)
+            data = data_object(system_data)
+            if data.get("mass") is None and {"initial_height", "final_height", "initial_velocity"} <= data.keys():
+                hi = number(data, "initial_height")
+                hf = number(data, "final_height")
+                vi = number(data, "initial_velocity")
+                g = number(data, "gravity", nonnegative=True) if "gravity" in data else 9.81
+                speed_squared = vi*vi + 2*g*(hi-hf)
+                if speed_squared < 0:
+                    return "Error: The available initial energy cannot reach the stated final height"
+                return ("Mechanical energy is conserved when nonconservative work is zero. Mass cancels from the speed equation.\n"
+                        f"v_f^2 = v_i^2 + 2g(h_i-h_f) = ({vi:g})^2 + 2*({g:g})*({hi:g}-{hf:g}) = {speed_squared:g}\n"
+                        f"Final speed: v_f = {math.sqrt(speed_squared):g} m/s\n"
+                        "This determines speed, not direction. Numerical energy values would additionally require the mass.")
+            data["mass"] = number(data, "mass", positive=True)
+            data["initial_velocity"] = number(data, "initial_velocity")
+            if any(key in data for key in ("initial_compression", "initial_stretch", "final_compression", "final_stretch")):
+                data["spring_constant"] = number(data, "spring_constant", positive=True)
             
             result = f"""
     Energy Conservation Analysis:
@@ -575,7 +607,9 @@ def serve(host, port, transport):
                 # mgh_i + ½mv_i² = mgh_f + ½mv_f²
                 # v_f² = v_i² + 2g(h_i - h_f)
                 vf_squared = vi**2 + 2 * gravity * (hi - hf)
-                vf = math.sqrt(vf_squared) if vf_squared >= 0 else 0
+                if vf_squared < 0:
+                    return "Error: The available initial energy cannot reach the stated final height"
+                vf = math.sqrt(vf_squared)
                 
                 result += f"\nSolving for final velocity using conservation:\n"
                 result += f"E_i = E_f\n"
@@ -685,7 +719,15 @@ def serve(host, port, transport):
             str: Complete energy analysis including friction effects
         """
         try:
-            data = json.loads(friction_data)
+            data = data_object(friction_data)
+            data["mass"] = number(data, "mass", positive=True)
+            data["initial_velocity"] = number(data, "initial_velocity")
+            if "friction_work" not in data and not {"friction_coefficient", "distance"} <= data.keys():
+                return "Error: Provide friction_work or friction_coefficient and distance for a horizontal surface"
+            if "friction_coefficient" in data:
+                data["friction_coefficient"] = number(data, "friction_coefficient", nonnegative=True)
+            if "distance" in data:
+                data["distance"] = number(data, "distance", nonnegative=True)
             
             result = f"""
     Energy Analysis with Friction:
@@ -771,7 +813,7 @@ def serve(host, port, transport):
                 pe_f = 0
             
             # Solve for unknown final values using energy balance
-            if "final_velocity" not in data and friction_work != 0:
+            if "final_velocity" not in data:
                 # Solve for final velocity
                 # E_i = E_f - W_friction (friction work is negative)
                 remaining_energy = initial_energy + friction_work - pe_f
@@ -889,7 +931,22 @@ def serve(host, port, transport):
             str: Comprehensive energy system analysis
         """
         try:
-            data = json.loads(system_data)
+            data = data_object(system_data)
+            data["mass"] = number(data, "mass", positive=True)
+            if "track_points" in data:
+                if not data["track_points"] or data["track_points"][0].get("velocity") is None:
+                    return "Error: Provide a nonempty track and the initial velocity"
+                if data.get("friction_coefficient", 0) and "track_length" not in data:
+                    return "Error: Provide track_length to account for friction"
+            elif "pendulum" in str(data.get("scenario", "")).lower():
+                data["length"] = number(data, "length", positive=True)
+                data["initial_angle_degrees"] = number(data, "initial_angle_degrees")
+            elif "spring_mass" in str(data.get("scenario", "")).lower() or data.get("scenario") == "spring_oscillator":
+                data["scenario"] = "spring_mass"
+                data["spring_constant"] = number(data, "spring_constant", positive=True)
+                data["amplitude"] = number(data, "amplitude", nonnegative=True)
+            else:
+                return "Error: Provide track_points, or a supported pendulum/spring_oscillator scenario with actual givens"
             
             scenario = data.get("scenario", "general_system")
             mass = data.get("mass", 1.0)
@@ -1059,6 +1116,16 @@ def serve(host, port, transport):
             
         except Exception as e:
             return f"Error in energy system analysis: {str(e)}"
+
+    @mcp.tool()
+    async def calculate_power_tool(work: float, time: float) -> str:
+        """Average power P = work/time, with work in joules and positive elapsed time in seconds."""
+        try:
+            work = number({"work": work}, "work")
+            time = number({"time": time}, "time", positive=True)
+            return f"Average power: P = W / Δt = {work:g} / {time:g} = {work/time:g} W"
+        except (ValueError, TypeError) as exc:
+            return f"Error in power calculation: {exc}"
 
     logger.info(
         f'{NAME} MCP Server at {host}:{port} and transport {transport}'

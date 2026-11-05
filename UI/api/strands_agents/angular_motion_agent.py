@@ -6,10 +6,11 @@ Uses Strands SDK with MCP angular motion tools
 
 import os
 from typing import Dict, Any
-from .base_physics_agent import StrandsPhysicsAgent
+from physics_worked_solutions import ground_domain_working
+from .conversation_agent import ConversationPhysicsAgent
 
 
-class AngularMotionAgent(StrandsPhysicsAgent):
+class AngularMotionAgent(ConversationPhysicsAgent):
     """
     Strands-based agent for angular motion problems
 
@@ -21,6 +22,32 @@ class AngularMotionAgent(StrandsPhysicsAgent):
     - Angular momentum (L = Iω)
     - Rotational kinetic energy
     """
+
+    worked_solution_required = True
+    verify_numerical_completeness = True
+    tutoring_guidance = """
+Angular-motion tutoring: identify the rotation axis, the actual body/system,
+and a consistent signed direction. Ask one next-step question and wait for the
+student's attempt. Constant-angular-acceleration equations require constant
+alpha; do not apply them to a time-dependent alpha without integration. Use
+radians in linear/angular relations and convert degrees or rpm explicitly.
+Torque is r cross F; a force through the axis gives zero torque. The angle is
+between r and F, not automatically 90 degrees. Moment of inertia depends on
+mass distribution and axis. tau_net = I alpha assumes constant I about a fixed
+axis. Angular momentum is conserved only for negligible net external torque
+about that axis. A skater can increase rotational kinetic energy by internal
+work while conserving angular momentum; zero external torque does not imply
+constant angular speed when I changes. Rolling without slipping requires
+v_cm = R omega and includes translational and rotational kinetic energies.
+Never invent an inertia, radius, mass, initial rest, or torque direction. Ask
+for missing conditions. Use numerical tools for calculations and show complete
+working for direct numerical solves. In guided reflection or an unfinished
+check-in, give one hint without revealing the final result. 'I'm lost' asks for
+a smaller prerequisite; release a full solution only on an explicit request.
+"""
+
+    def _ground_worked_solution(self, worked, tool_outputs):
+        return ground_domain_working(worked, tool_outputs)
 
     def __init__(
         self,

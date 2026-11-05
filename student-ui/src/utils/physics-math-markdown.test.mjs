@@ -5,9 +5,16 @@ import { formatPhysicsMathMarkdown as format } from './physics-math-markdown.ts'
 test('mechanics palette symbols retain subscripts and render as complete math', () => {
   for (const symbol of ['p_i', 'p_f', 'K_i', 'K_f', 'U_i', 'U_f', '\\vec{p}', '\\Delta p',
     '\\Delta K', '\\theta_i', '\\theta_f', '\\omega_i', '\\omega_f', '\\alpha', '\\sum \\tau', '\\vec{L}',
+    '\\Delta T', '\\Delta U', 'T_h', 'T_c', '\\eta',
     '\\Delta \\omega', '\\omega_{f}', '\\omega_f^2', 'K_{rot}', 'r^{2}', 'v_i^2', 'y^x', 'x^{}']) {
     assert.equal(format(symbol), `$${symbol}$`, symbol)
   }
+})
+
+test('numerical results with bare LaTeX units receive complete math delimiters', () => {
+  assert.equal(format(String.raw`-41860 \, \text{J} = -41.86 \, \text{kJ}`),
+    String.raw`$-41860 \, \text{J}$ = $-41.86 \, \text{kJ}$`)
+  assert.equal(format(String.raw`$-41860\,\mathrm{J}$`), String.raw`$-41860\,\mathrm{J}$`)
 })
 
 test('legacy braced subscripts do not leave a closing brace outside math', () => {

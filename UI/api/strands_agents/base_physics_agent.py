@@ -2292,6 +2292,7 @@ class StrandsPhysicsAgent(ABC):
             "torque_data",
             "momentum_data",
             "energy_data",
+            "process_data",
             "impulse_data",
             "rolling_data",
             "circular_data",

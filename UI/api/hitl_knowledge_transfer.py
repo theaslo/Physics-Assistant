@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 from force_quiz_reflection import is_force_quiz_reflection_prompt
+from tutoring_profiles import MECHANICS_AGENTS
 
 try:
     from strands import Agent
@@ -58,7 +59,7 @@ class KnowledgeTransferGate:
         pilot_agents_raw = os.getenv("HITL_PILOT_AGENTS", "forces_agent,kinematics_agent")
         self.pilot_agents = {a.strip() for a in pilot_agents_raw.split(",") if a.strip()}
         self.contextual_agents = {agent.strip() for agent in os.getenv(
-            "HITL_CONTEXTUAL_AGENTS", "momentum_agent"
+            "HITL_CONTEXTUAL_AGENTS", ",".join(sorted(MECHANICS_AGENTS))
         ).split(",") if agent.strip()}
 
         self._pending_checks: Dict[str, Dict[str, Any]] = {}

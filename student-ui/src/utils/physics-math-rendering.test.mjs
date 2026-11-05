@@ -47,3 +47,23 @@ test('inline-positioned display math from the live model is placed on its own li
   assert.match(html, /<p>The direction is east\.<\/p>/)
   assert.doesNotMatch(html, /katex-error|<code/)
 })
+
+test('rotation and thermodynamics worked substitutions render signed values and units', () => {
+  for (const content of [
+    String.raw`$$\begin{gathered}\omega_f=2+(3)(4)=14\,\mathrm{rad/s}\\\theta_f=(2)(4)+\frac12(3)(4)^2=32\,\mathrm{rad}\end{gathered}$$`,
+    String.raw`$$\begin{gathered}\Delta U=(0\,\mathrm{J})-(-200\,\mathrm{J})=200\,\mathrm{J}\end{gathered}$$`,
+    String.raw`$$\eta_{\max}=1-\frac{300\,\mathrm{K}}{600\,\mathrm{K}}=0.5$$`,
+  ]) {
+    const html = render(content)
+    assert.match(html, /class="katex/)
+    assert.doesNotMatch(html, /katex-error|<code/)
+  }
+})
+
+test('a heat result with bare LaTeX units renders as quantities instead of raw commands', () => {
+  const html = render(String.raw`-41860 \, \text{J} = -41.86 \, \text{kJ}`)
+  assert.match(html, /class="katex"/)
+  assert.match(html, /<mtext>J<\/mtext>/)
+  assert.match(html, /<mtext>kJ<\/mtext>/)
+  assert.doesNotMatch(html, /katex-error|<code/)
+})

@@ -24,6 +24,7 @@ import {
 } from '@mui/icons-material'
 import { useStore, useMessages, useSelectedAgentInfo, type Message, type StudentDrawing } from '../stores/chat-store'
 import { apiClient, type SolveResponse } from '../services/api-client'
+import { conversationHistoryLimit, usesContextualTutoring } from '../utils/tutoring-agents'
 import AgentSelector from '../components/AgentSelector'
 import ChatMessage from '../components/ChatMessage'
 import ChatInput from '../components/ChatInput'
@@ -55,7 +56,7 @@ function serializeDrawingForAnalysis(drawing?: StudentDrawing) {
 function buildConversationContext(messages: Message[], agentId: string) {
   const recentMessages = messages
     .filter((message) => message.agentId === agentId)
-    .slice(['forces_agent', 'momentum_agent'].includes(agentId) ? -40 : -6)
+    .slice(-conversationHistoryLimit(agentId))
     .map((message) => ({
       role: message.role,
       content: message.content.slice(0, agentId === 'math_agent' ? 12000 : 2000),
@@ -376,7 +377,7 @@ export default function ChatPage() {
           return
         }
         if (response.success) {
-          if (agentId === 'momentum_agent') {
+          if (usesContextualTutoring(agentId)) {
             addMessage({
               id: `check-question-${activeCheck.checkId}`, role: 'assistant', agentId,
               timestamp: Date.now(), content: activeCheck.question + '\n' + activeCheck.options.map((o) => `${o.id}: ${o.text}`).join('\n'),
@@ -400,14 +401,14 @@ export default function ChatPage() {
           appendAssistantMessage(agentId, response)
         } else {
           setError(response.error || 'Failed to process knowledge-check answer')
-          if (agentId === 'momentum_agent') {
+          if (usesContextualTutoring(agentId)) {
             setPendingKnowledgeCheck(activeCheck)
           }
         }
       } catch (err) {
         console.error('Knowledge-check submission error:', err)
         setError('Failed to submit knowledge-check answer. Please try again.')
-        if (agentId === 'momentum_agent') {
+        if (usesContextualTutoring(agentId)) {
           setPendingKnowledgeCheck(activeCheck)
         }
       } finally {

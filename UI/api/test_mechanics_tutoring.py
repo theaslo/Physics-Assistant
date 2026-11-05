@@ -7,9 +7,12 @@ from unittest.mock import AsyncMock, Mock
 from hitl_knowledge_transfer import KnowledgeTransferGate
 from mechanics_tutoring import solve_mechanics_turn
 from strands_agents.momentum_agent import MomentumAgent
+from strands_agents.energy_agent import EnergyAgent
+from strands_agents.angular_motion_agent import AngularMotionAgent
+from strands_agents.thermodynamics_agent import ThermodynamicsAgent
 
 
-AGENTS = (MomentumAgent,)
+AGENTS = (MomentumAgent, EnergyAgent, AngularMotionAgent, ThermodynamicsAgent)
 CHECK = {
     "needs_check": True, "confidence": 0.95, "concept_tag": "isolated_collision",
     "question": "For these sticking carts, which quantity is conserved during the collision?",
@@ -212,7 +215,7 @@ class MechanicsConversationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("Verified conceptual MCP reference:\nVerified physics.", system)
 
     async def test_short_equation_is_graded_as_attempt_not_new_problem(self):
-        for cls, equation in zip(AGENTS, ("p=mv", "K=0.5*m*v^2", "L=I*omega")):
+        for cls, equation in zip(AGENTS, ("p=mv", "K=0.5*m*v^2", "L=I*omega", "Delta U=Q-W")):
             with self.subTest(agent=cls.__name__):
                 agent = agent_for(cls)
                 agent._request_ollama_generate = Mock(side_effect=[
