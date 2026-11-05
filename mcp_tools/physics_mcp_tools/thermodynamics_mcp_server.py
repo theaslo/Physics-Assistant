@@ -8,6 +8,8 @@ import json
 import argparse
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.utilities.logging import get_logger
+from physics_mcp_tools.concept_principles import register_principles
+from physics_mcp_tools.input_validation import data_object, number
 
 NAME = "thermodynamics_mcp_server"
 logger = get_logger(__name__)
@@ -22,6 +24,7 @@ def serve(host, port, transport):
     """Initialize and run the Thermodynamics MCP server."""
     logger.info('Starting Thermodynamics MCP Server')
     mcp = FastMCP(NAME, stateless_http=False)
+    register_principles(mcp, "thermodynamics")
 
     def with_diagram_payload(result_text: str, payload: dict) -> str:
         """Append machine-readable payload for frontend thermodynamics diagrams."""
@@ -47,7 +50,7 @@ def serve(host, port, transport):
             str: Complete ideal gas law analysis
         """
         try:
-            data = json.loads(gas_data) if isinstance(gas_data, str) else gas_data
+            data = data_object(gas_data)
 
             P = data.get("pressure", data.get("P", None))
             V = data.get("volume", data.get("V", None))
@@ -55,14 +58,16 @@ def serve(host, port, transport):
             T = data.get("temperature", data.get("T", None))
 
             # Convert to float
-            if P is not None: P = float(P)
-            if V is not None: V = float(V)
-            if n is not None: n = float(n)
-            if T is not None: T = float(T)
+            if P is not None: P = number(data, "pressure", "P", positive=True)
+            if V is not None: V = number(data, "volume", "V", positive=True)
+            if n is not None: n = number(data, "moles", "n", positive=True)
+            if T is not None: T = number(data, "temperature", "T", positive=True)
 
             known_count = sum(1 for v in [P, V, n, T] if v is not None)
             if known_count < 3:
                 return "Error: Need at least 3 known values (pressure, volume, moles, temperature)"
+            if known_count == 4 and not math.isclose(P * V, n * R_UNIVERSAL * T, rel_tol=1e-3):
+                return "Error: The supplied state is inconsistent with PV = nRT; check values and kelvin temperatures"
 
             result = """
 Ideal Gas Law Analysis (PV = nRT):
@@ -155,17 +160,21 @@ Ideal Gas Law Analysis (PV = nRT):
             str: Complete heat transfer analysis
         """
         try:
-            data = json.loads(heat_data) if isinstance(heat_data, str) else heat_data
+            data = data_object(heat_data)
 
             Q = data.get("heat", data.get("Q", None))
             m = data.get("mass", data.get("m", None))
             c = data.get("specific_heat", data.get("c", None))
             dT = data.get("temp_change", data.get("delta_T", data.get("dT", None)))
 
-            if Q is not None: Q = float(Q)
-            if m is not None: m = float(m)
-            if c is not None: c = float(c)
-            if dT is not None: dT = float(dT)
+            if Q is not None: Q = number(data, "heat", "Q")
+            if m is not None: m = number(data, "mass", "m", positive=True)
+            if c is not None: c = number(data, "specific_heat", "c", positive=True)
+            if dT is not None: dT = number(data, "temp_change", "delta_T", "dT")
+            if sum(value is not None for value in (Q, m, c, dT)) < 3:
+                return "Error: Provide three known values among heat, mass, specific_heat and temp_change"
+            if all(value is not None for value in (Q, m, c, dT)) and not math.isclose(Q, m*c*dT, rel_tol=1e-3, abs_tol=1e-9):
+                return "Error: The supplied values are inconsistent with Q = mcΔT"
 
             result = """
 Heat Transfer Analysis (Q = mcΔT):
@@ -180,29 +189,32 @@ Heat Transfer Analysis (Q = mcΔT):
 
             result += "\nHeat Transfer Equation: Q = mcΔT\n\n"
 
-            if Q is None and m and c and dT:
+            if Q is None:
                 Q = m * c * dT
                 result += f"Solving for Heat:\n"
                 result += f"Q = mcΔT = {m:.4f} × {c:.2f} × {dT:.2f}\n"
                 result += f"Q = {Q:.2f} J = {Q/1000:.3f} kJ\n"
 
-            elif m is None and Q and c and dT:
+            elif m is None:
                 m = Q / (c * dT)
                 result += f"Solving for Mass:\n"
                 result += f"m = Q / (cΔT) = {Q:.2f} / ({c:.2f} × {dT:.2f})\n"
                 result += f"m = {m:.4f} kg\n"
 
-            elif c is None and Q and m and dT:
+            elif c is None:
                 c = Q / (m * dT)
                 result += f"Solving for Specific Heat:\n"
                 result += f"c = Q / (mΔT) = {Q:.2f} / ({m:.4f} × {dT:.2f})\n"
                 result += f"c = {c:.2f} J/(kg·K)\n"
 
-            elif dT is None and Q and m and c:
+            elif dT is None:
                 dT = Q / (m * c)
                 result += f"Solving for Temperature Change:\n"
                 result += f"ΔT = Q / (mc) = {Q:.2f} / ({m:.4f} × {c:.2f})\n"
                 result += f"ΔT = {dT:.2f} K (or °C)\n"
+
+            if m <= 0 or c <= 0:
+                return "Error: The inferred mass and specific heat must be positive"
 
             result += """
 Common Specific Heat Values:
@@ -250,10 +262,12 @@ Common Specific Heat Values:
             str: Complete thermal expansion analysis
         """
         try:
-            data = json.loads(expansion_data) if isinstance(expansion_data, str) else expansion_data
+            data = data_object(expansion_data)
 
             exp_type = data.get("type", "linear").lower()
-            dT = float(data.get("temp_change", data.get("dT", 0)))
+            dT = number(data, "temp_change", "dT")
+            if exp_type not in {"linear", "volume", "volumetric"}:
+                return "Error: Expansion type must be linear or volume"
 
             result = """
 Thermal Expansion Analysis:
@@ -261,8 +275,8 @@ Thermal Expansion Analysis:
 
 """
             if exp_type == "linear":
-                L0 = float(data.get("length", data.get("L0", data.get("L", 1))))
-                alpha = float(data.get("alpha", data.get("coefficient", 12e-6)))
+                L0 = number(data, "length", "L0", "L", positive=True)
+                alpha = number(data, "alpha", "coefficient")
 
                 dL = alpha * L0 * dT
                 L_final = L0 + dL
@@ -279,8 +293,8 @@ Thermal Expansion Analysis:
                 result += f"Final Length: L = L₀ + ΔL = {L_final:.6f} m\n"
 
             else:  # volume
-                V0 = float(data.get("volume", data.get("V0", data.get("V", 1))))
-                beta = float(data.get("beta", data.get("coefficient", 36e-6)))
+                V0 = number(data, "volume", "V0", "V", positive=True)
+                beta = number(data, "beta", "coefficient")
 
                 dV = beta * V0 * dT
                 V_final = V0 + dV
@@ -325,12 +339,12 @@ Note: β ≈ 3α for isotropic materials
             str: Complete heat conduction analysis
         """
         try:
-            data = json.loads(conduction_data) if isinstance(conduction_data, str) else conduction_data
+            data = data_object(conduction_data)
 
-            k = float(data.get("conductivity", data.get("k", 1)))
-            A = float(data.get("area", data.get("A", 1)))
-            L = float(data.get("thickness", data.get("L", data.get("length", 1))))
-            dT = float(data.get("temp_diff", data.get("dT", data.get("delta_T", 1))))
+            k = number(data, "conductivity", "k", positive=True)
+            A = number(data, "area", "A", positive=True)
+            L = number(data, "thickness", "L", "length", positive=True)
+            dT = number(data, "temp_diff", "dT", "delta_T")
 
             # Heat flow rate
             Q_rate = k * A * dT / L
@@ -395,14 +409,16 @@ Common Thermal Conductivities:
             str: Complete Carnot efficiency analysis
         """
         try:
-            data = json.loads(carnot_data) if isinstance(carnot_data, str) else carnot_data
+            data = data_object(carnot_data)
 
-            T_hot = float(data.get("T_hot", data.get("Th", 500)))
-            T_cold = float(data.get("T_cold", data.get("Tc", 300)))
+            T_hot = number(data, "T_hot", "Th", positive=True)
+            T_cold = number(data, "T_cold", "Tc", positive=True)
+            if T_hot <= T_cold:
+                return "Error: A heat engine requires T_hot > T_cold > 0 in kelvin"
             Q_hot = data.get("Q_hot", data.get("Qh", None))
 
             if Q_hot is not None:
-                Q_hot = float(Q_hot)
+                Q_hot = number(data, "Q_hot", "Qh", nonnegative=True)
 
             # Carnot efficiency
             efficiency = 1 - (T_cold / T_hot)
@@ -474,6 +490,61 @@ Key Points:
 
         except Exception as e:
             return f"Error in Carnot efficiency calculation: {str(e)}"
+
+    @mcp.tool()
+    async def first_law_thermodynamics(energy_data: str) -> str:
+        """Solve Delta U = Q - W_by with two known quantities, in joules.
+
+        energy_data is JSON with heat, work_by_system (or work_on_system),
+        and/or internal_energy_change. Heat into the system and work by it
+        are positive. Example: {"heat": 500, "work_by_system": 200}.
+        """
+        try:
+            data = data_object(energy_data)
+            q = number(data, "heat", "Q") if any(data.get(k) is not None for k in ("heat", "Q")) else None
+            du = number(data, "internal_energy_change", "delta_U") if any(data.get(k) is not None for k in ("internal_energy_change", "delta_U")) else None
+            w = number(data, "work_by_system", "W_by") if any(data.get(k) is not None for k in ("work_by_system", "W_by")) else None
+            if data.get("work_on_system") is not None:
+                work_on = number(data, "work_on_system")
+                if w is not None and not math.isclose(w, -work_on, abs_tol=1e-9):
+                    return "Error: work_by_system must equal minus work_on_system"
+                w = -work_on
+            if sum(value is not None for value in (q, du, w)) < 2:
+                return "Error: Provide two of heat, work_by_system/work_on_system, internal_energy_change"
+            if du is None:
+                du = q - w
+            elif q is None:
+                q = du + w
+            elif w is None:
+                w = q - du
+            elif not math.isclose(du, q-w, rel_tol=1e-9, abs_tol=1e-9):
+                return "Error: The quantities do not satisfy ΔU = Q - W_by"
+            return (f"First law: ΔU = Q - W_by\n"
+                    f"Heat into the system: Q = {q:g} J\n"
+                    f"Work by the system: W_by = {w:g} J\n"
+                    f"ΔU = {q:g} - ({w:g}) = {du:g} J\n"
+                    "Positive Q adds energy; positive work by the system removes energy.")
+        except (ValueError, TypeError, ZeroDivisionError) as exc:
+            return f"Error in first law calculation: {exc}"
+
+    @mcp.tool()
+    async def constant_pressure_work(process_data: str) -> str:
+        """Compute W_by = P(V_final - V_initial) at explicitly constant pressure.
+
+        JSON requires pressure (Pa), initial_volume and final_volume (m^3).
+        Expansion gives positive work by the gas; compression gives negative work.
+        """
+        try:
+            data = data_object(process_data)
+            p = number(data, "pressure", positive=True)
+            vi = number(data, "initial_volume", positive=True)
+            vf = number(data, "final_volume", positive=True)
+            w = p * (vf - vi)
+            return (f"Constant-pressure work: W_by = P(V_f - V_i)\n"
+                    f"W_by = {p:g} * ({vf:g} - {vi:g}) = {w:g} J\n"
+                    "This relation requires constant pressure. Work by the gas is positive during expansion.")
+        except (ValueError, TypeError) as exc:
+            return f"Error in constant pressure work calculation: {exc}"
 
     logger.info(f'{NAME} MCP Server at {host}:{port} and transport {transport}')
     if transport == "sse":

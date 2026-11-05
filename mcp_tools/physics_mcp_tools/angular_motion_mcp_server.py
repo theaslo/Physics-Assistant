@@ -5,6 +5,8 @@ import logging
 import argparse
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.utilities.logging import get_logger
+from physics_mcp_tools.concept_principles import register_principles
+from physics_mcp_tools.input_validation import data_object, number
 
 from physics_mcp_tools.angular_motion_utils import (
     degrees_to_radians,
@@ -34,6 +36,7 @@ def serve(host, port, transport):
     logger.info('Starting Angular Motion MCP Server')
 # Initialize FastMCP server
     mcp = FastMCP("angular_motion")
+    register_principles(mcp, "angular_motion")
 
     def with_diagram_payload(result_text: str, payload: Dict) -> str:
         """Append machine-readable diagram payload for downstream UI rendering."""
@@ -47,166 +50,89 @@ def serve(host, port, transport):
 
     @mcp.tool()
     async def angular_kinematics(kinematics_data: str) -> str:
-        """
-        Solve angular kinematics problems using rotational motion equations.
-        
-        Args:
-            kinematics_data: JSON string with kinematics parameters
-                            Examples:
-                            '{"omega_0": 5, "alpha": 2, "time": 3}'
-                            '{"omega_0": 0, "omega_f": 10, "theta": 25}'
-                            '{"theta_0": 0, "omega_0": 5, "alpha": 2, "time": 4}'
-            
-        Returns:
-            str: Complete angular kinematics analysis
+        """Solve fixed-axis kinematics at constant angular acceleration.
+
+        JSON needs enough of omega_0, alpha, time, omega_f and theta to solve.
+        theta is final angular position; theta_0 defaults to a stated zero
+        coordinate reference. Use radians, rad/s, rad/s^2, and seconds.
+        Negative angular velocities/accelerations are allowed. If displacement
+        alone permits two future states, also specify final_direction or time.
         """
         try:
-            data = json.loads(kinematics_data)
-            
-            result = f"""
-    Angular Kinematics Analysis:
-    ===========================
-
-    Given Data:
-    """
-            
-            for key, value in data.items():
-                unit = ""
-                if "omega" in key.lower():
-                    unit = " rad/s"
-                elif "alpha" in key.lower():
-                    unit = " rad/s²"
-                elif "theta" in key.lower():
-                    unit = " rad"
-                elif "time" in key.lower():
-                    unit = " s"
-                
-                result += f"- {key.replace('_', ' ').title()}: {value}{unit}\n"
-            
-            result += f"""
-    Angular Kinematic Equations:
-    1. θ = θ₀ + ω₀t + ½αt²  (angular displacement)
-    2. ω = ω₀ + αt           (angular velocity from acceleration)
-    3. ω² = ω₀² + 2α(θ-θ₀)   (angular velocity from displacement)
-
-    Analysis:
-    """
-            
-            # Extract known values
-            theta_0 = data.get("theta_0", 0)
-            omega_0 = data.get("omega_0", 0)
-            omega_f = data.get("omega_f")
-            alpha = data.get("alpha")
-            time = data.get("time")
-            theta = data.get("theta")
-            time_window = None
-            
-            # Solve based on given information
-            if omega_0 is not None and alpha is not None and time is not None:
-                # Calculate final values using equations 1 and 2
-                theta_f = theta_0 + calculate_angular_displacement(omega_0, alpha, time)
-                omega_f_calc = calculate_angular_velocity_from_acceleration(omega_0, alpha, time)
-                
-                result += f"""Using ω₀, α, and t:
-    θf = θ₀ + ω₀t + ½αt² = {theta_0} + {omega_0}×{time} + ½×{alpha}×{time}² = {theta_f:.3f} rad
-    ωf = ω₀ + αt = {omega_0} + {alpha}×{time} = {omega_f_calc:.3f} rad/s
-
-    Total angular displacement: Δθ = {theta_f - theta_0:.3f} rad = {radians_to_degrees(theta_f - theta_0):.1f}°
-    Angular acceleration: α = {alpha:.3f} rad/s²
-
-    """
-                time_window = max(0.0, float(time))
-                
-            elif omega_0 is not None and omega_f is not None and alpha is not None:
-                # Calculate time and displacement using equation 2
-                time_calc = (omega_f - omega_0) / alpha
-                theta_change = (omega_f**2 - omega_0**2) / (2 * alpha)
-                theta_f = theta_0 + theta_change
-                
-                result += f"""Using ω₀, ωf, and α:
-    Time calculation: t = (ωf - ω₀)/α = ({omega_f} - {omega_0})/{alpha} = {time_calc:.3f} s
-    Angular displacement: Δθ = (ωf² - ω₀²)/(2α) = ({omega_f}² - {omega_0}²)/(2×{alpha}) = {theta_change:.3f} rad
-    Final position: θf = θ₀ + Δθ = {theta_0} + {theta_change:.3f} = {theta_f:.3f} rad
-
-    """
-                time_window = max(0.0, float(time_calc))
-                
-            elif omega_0 is not None and alpha is not None and theta is not None:
-                # Calculate final velocity using equation 3
-                theta_change = theta - theta_0 if theta_0 else theta
-                omega_f_calc = calculate_angular_velocity_from_displacement(omega_0, alpha, theta_change)
-                time_calc = (omega_f_calc - omega_0) / alpha if alpha != 0 else 0
-                
-                result += f"""Using ω₀, α, and θ:
-    Angular displacement: Δθ = {theta_change:.3f} rad
-    Final angular velocity: ωf = √(ω₀² + 2αΔθ) = √({omega_0}² + 2×{alpha}×{theta_change:.3f}) = {omega_f_calc:.3f} rad/s
-    Time taken: t = (ωf - ω₀)/α = {time_calc:.3f} s
-
-    """
-                time_window = max(0.0, float(time_calc))
-            
-            # Convert to degrees and other units
-            if 'omega_f_calc' in locals():
-                omega_f = omega_f_calc
-            if 'theta_f' in locals():
-                result += f"""Unit Conversions:
-    Angular displacement: {theta_f - theta_0:.3f} rad = {radians_to_degrees(theta_f - theta_0):.1f}°
-    """
-            
-            if omega_f:
-                result += f"""Final angular velocity: {omega_f:.3f} rad/s = {omega_f * 60/(2*math.pi):.1f} rpm
-
-    """
-            
-            result += f"""Physical Interpretation:
-    - Angular displacement (θ): How much the object has rotated
-    - Angular velocity (ω): How fast the object is rotating
-    - Angular acceleration (α): How rapidly the rotation is changing
-    - All quantities follow the same mathematical relationships as linear motion
-
-    Applications:
-    - Spinning wheels, gears, and rotors
-    - Planetary and satellite motion
-    - Gyroscopes and spinning tops
-    - Motors and turbines
-    - Amusement park rides
-
-    Key Relationships:
-    - Linear velocity: v = rω (where r is radius)
-    - Linear acceleration: a = rα (tangential acceleration)
-    - Period: T = 2π/ω (time for one complete revolution)
-    - Frequency: f = ω/(2π) = 1/T (revolutions per second)
-    """
-            
-            # Build a rotation graphs payload for UI if we have enough signal.
-            try:
-                alpha_plot = float(alpha) if alpha is not None else 0.0
-                omega0_plot = float(omega_0) if omega_0 is not None else 0.0
-                theta0_plot = float(theta_0) if theta_0 is not None else 0.0
-                t_end = float(time_window) if time_window is not None else (max(0.0, float(time)) if time is not None else 5.0)
-                if t_end <= 0:
-                    t_end = 5.0
-
-                n = 30
-                times = [i * t_end / (n - 1) for i in range(n)]
-                theta_series = [theta0_plot + omega0_plot * t + 0.5 * alpha_plot * t * t for t in times]
-                omega_series = [omega0_plot + alpha_plot * t for t in times]
-                alpha_series = [alpha_plot for _ in times]
-
-                payload = {
-                    "type": "rotation_graphs_plot",
-                    "title": "Angular Kinematics Graphs",
-                    "times_s": times,
-                    "theta_series_rad": theta_series,
-                    "omega_series_rad_s": omega_series,
-                    "alpha_series_rad_s2": alpha_series,
-                }
-                return with_diagram_payload(result, payload)
-            except Exception:
-                return result
-            
-        except Exception as e:
-            return f"Error in angular kinematics analysis: {str(e)}"
+            data = data_object(kinematics_data)
+            th0 = number(data, "theta_0") if "theta_0" in data else 0.0
+            known = {key: number(data, key) for key in ("alpha", "time", "omega_f", "theta")
+                     if data.get(key) is not None}
+            a, t, wf, th = (known.get(key) for key in ("alpha", "time", "omega_f", "theta"))
+            if t is not None and t < 0:
+                raise ValueError("Elapsed time must be nonnegative")
+            if data.get("omega_0") is not None:
+                w0 = number(data, "omega_0")
+            elif wf is not None and a is not None and t is not None:
+                w0 = wf - a*t
+            elif th is not None and a is not None and t is not None and t > 0:
+                w0 = (th - th0 - 0.5*a*t*t) / t
+            else:
+                raise ValueError("Initial angular velocity or enough endpoint data is required; do not assume initial rest")
+            if a is None:
+                if t is not None and t > 0 and wf is not None:
+                    a = (wf - w0) / t
+                elif t is not None and t > 0 and th is not None:
+                    a = 2 * (th - th0 - w0*t) / t**2
+                elif wf is not None and th is not None and th != th0:
+                    a = (wf**2 - w0**2) / (2*(th-th0))
+                else:
+                    raise ValueError("Provide enough known values to determine constant angular acceleration")
+            if t is None:
+                if wf is not None and a != 0:
+                    t = (wf - w0) / a
+                elif th is not None and a == 0 and w0 != 0:
+                    t = (th-th0) / w0
+                elif th is not None and a != 0:
+                    square = w0**2 + 2*a*(th-th0)
+                    if square < 0:
+                        raise ValueError("The stated final position is not reached under this acceleration")
+                    roots = {math.sqrt(square), -math.sqrt(square)}
+                    possible = [(value-w0)/a for value in roots if (value-w0)/a >= 0]
+                    direction = data.get("final_direction")
+                    if direction is not None:
+                        if direction not in ("positive", "negative"):
+                            raise ValueError("final_direction must be positive or negative")
+                        possible = [value for value in possible
+                                    if (w0+a*value >= 0) == (direction == "positive")]
+                    if len(possible) != 1:
+                        raise ValueError("Final direction or elapsed time is needed to choose a unique future state")
+                    t = possible[0]
+                else:
+                    raise ValueError("Elapsed time or enough endpoint data is required")
+            if t < 0:
+                raise ValueError("These values require negative elapsed time")
+            wf_calc, th_calc = w0 + a*t, th0 + w0*t + 0.5*a*t*t
+            if not all(math.isfinite(v) for v in (wf_calc, th_calc, a, t)):
+                raise ValueError("Calculation overflow; check units and values")
+            if wf is not None and not math.isclose(wf, wf_calc, rel_tol=1e-6, abs_tol=1e-9):
+                raise ValueError("The supplied final angular velocity is inconsistent")
+            if th is not None and not math.isclose(th, th_calc, rel_tol=1e-6, abs_tol=1e-9):
+                raise ValueError("The supplied final angular position is inconsistent")
+            result = (f"Constant angular acceleration (positive and negative directions use one fixed axis):\n"
+                      f"Initial position: theta_0 = {th0:g} rad\n"
+                      f"Initial angular velocity: omega_0 = {w0:g} rad/s\n"
+                      f"Angular acceleration: alpha = {a:g} rad/s^2\n"
+                      f"Elapsed time: t = {t:g} s\n"
+                      f"omega_f = omega_0 + alpha*t = {w0:g} + ({a:g})*{t:g} = {wf_calc:g} rad/s\n"
+                      f"theta_f = theta_0 + omega_0*t + 0.5*alpha*t^2 = {th_calc:g} rad\n"
+                      f"Angular displacement: delta_theta = {th_calc-th0:g} rad\n"
+                      "These equations require constant angular acceleration.")
+            times = [i*t/29 for i in range(30)]
+            return with_diagram_payload(result, {
+                "type": "rotation_graphs_plot", "title": "Angular Kinematics Graphs",
+                "times_s": times,
+                "theta_series_rad": [th0 + w0*x + 0.5*a*x*x for x in times],
+                "omega_series_rad_s": [w0+a*x for x in times],
+                "alpha_series_rad_s2": [a]*30,
+            })
+        except (ValueError, TypeError, ZeroDivisionError, OverflowError) as exc:
+            return f"Error in angular kinematics analysis: {exc}"
 
     @mcp.tool()
     async def calculate_moment_of_inertia(object_data: str) -> str:
@@ -225,7 +151,7 @@ def serve(host, port, transport):
             str: Complete moment of inertia calculation with explanation
         """
         try:
-            data = json.loads(object_data)
+            data = data_object(object_data)
             
             shape = data["shape"].lower()
             mass = data["mass"]
@@ -379,7 +305,25 @@ def serve(host, port, transport):
             str: Complete torque calculation and analysis
         """
         try:
-            data = json.loads(torque_data)
+            data = data_object(torque_data)
+            if "force" in data or "radius" in data:
+                data["force"] = number(data, "force")
+                data["radius"] = number(data, "radius", nonnegative=True)
+                data["angle"] = number(data, "angle")
+                direction = data.get("direction")
+                if direction not in (None, "clockwise", "counterclockwise"):
+                    raise ValueError("direction must be clockwise or counterclockwise")
+                if direction is not None:
+                    data["angle"] = (-1 if direction == "clockwise" else 1) * abs(data["angle"])
+            elif {"moment_of_inertia", "angular_acceleration"} <= data.keys():
+                data["moment_of_inertia"] = number(data, "moment_of_inertia", positive=True)
+                data["angular_acceleration"] = number(data, "angular_acceleration")
+            elif not data.get("forces"):
+                raise ValueError("Provide force, radius and angle, or inertia and angular acceleration")
+            for force_data in data.get("forces", []):
+                force_data["force"] = number(force_data, "force")
+                force_data["radius"] = number(force_data, "radius", nonnegative=True)
+                force_data["angle"] = number(force_data, "angle")
             
             result = f"""
     Torque Calculation:
@@ -568,7 +512,7 @@ def serve(host, port, transport):
             str: Complete angular momentum analysis
         """
         try:
-            data = json.loads(momentum_data)
+            data = data_object(momentum_data)
             
             result = f"""
     Angular Momentum Conservation Analysis:
@@ -601,9 +545,16 @@ def serve(host, port, transport):
                     final_desc = "Final state"
                 
                 # Calculate missing omega using conservation
+                I1 = number({"I": I1}, "I", positive=True)
+                I2 = number({"I": I2}, "I", positive=True)
+                omega1 = number({"omega": omega1}, "omega")
                 L_initial = I1 * omega1
                 if omega2 is None:
                     omega2 = L_initial / I2
+                else:
+                    omega2 = number({"omega": omega2}, "omega")
+                    if not math.isclose(L_initial, I2*omega2, rel_tol=1e-6, abs_tol=1e-9):
+                        return "Error: Supplied endpoints do not conserve angular momentum; check external torque or givens"
                 L_final = I2 * omega2
                 
                 result += f"""Scenario: {scenario}
@@ -764,7 +715,7 @@ def serve(host, port, transport):
             str: Complete rotational energy analysis
         """
         try:
-            data = json.loads(energy_data)
+            data = data_object(energy_data)
             
             result = f"""
     Rotational Energy Analysis:
@@ -776,6 +727,8 @@ def serve(host, port, transport):
             if "moment_of_inertia" in data and "angular_velocity" in data:
                 I = data["moment_of_inertia"]
                 omega = data["angular_velocity"]
+                I = number({"I": I}, "I", positive=True)
+                omega = number({"omega": omega}, "omega")
                 
                 KE_rot = 0.5 * I * omega**2
                 
@@ -1001,7 +954,7 @@ def serve(host, port, transport):
             str: Complete angular impulse-momentum analysis
         """
         try:
-            data = json.loads(impulse_data)
+            data = data_object(impulse_data)
             
             result = f"""
     Angular Impulse-Momentum Analysis:
@@ -1224,7 +1177,7 @@ def serve(host, port, transport):
             str: Complete rolling motion analysis
         """
         try:
-            data = json.loads(rolling_data)
+            data = data_object(rolling_data)
             
             result = f"""
     Rolling Motion Analysis:

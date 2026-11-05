@@ -1,4 +1,4 @@
-import { Box, Button, Chip, Stack, Typography } from '@mui/material'
+import { Box, Button, Stack, Typography } from '@mui/material'
 import type { PendingKnowledgeCheck } from '../stores/chat-store'
 
 interface KnowledgeCheckPanelProps {
@@ -27,11 +27,6 @@ export default function KnowledgeCheckPanel({
       <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
         Select one answer. If it is not correct, we will pause and review it before continuing.
       </Typography>
-
-      <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: 'wrap', gap: 1 }}>
-        <Chip label={check.agentId.replace('_agent', '')} size="small" />
-        <Chip label={check.conceptTag} size="small" color="primary" />
-      </Stack>
 
       <Typography variant="subtitle1" sx={{ mt: 2.5, fontWeight: 600 }}>
         {check.question}

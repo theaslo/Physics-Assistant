@@ -6,10 +6,11 @@ Uses Strands SDK with MCP thermodynamics tools
 
 import os
 from typing import Dict, Any
-from .base_physics_agent import StrandsPhysicsAgent
+from physics_worked_solutions import ground_domain_working
+from .conversation_agent import ConversationPhysicsAgent
 
 
-class ThermodynamicsAgent(StrandsPhysicsAgent):
+class ThermodynamicsAgent(ConversationPhysicsAgent):
     """
     Strands-based agent for thermodynamics problems
 
@@ -21,6 +22,53 @@ class ThermodynamicsAgent(StrandsPhysicsAgent):
     - Carnot efficiency
     - First and Second Laws of Thermodynamics
     """
+
+    worked_solution_required = True
+    verify_numerical_completeness = True
+    check_in_guidance = """
+For thermodynamics, ask ONE decision about the energy transfer, process
+constraint, or temperature convention that is needed for THIS requested
+calculation. State the sign convention explicitly if testing a work sign.
+Refer to the actual gas/process in the question. Prefer asking whether a
+specified transfer adds or removes energy in THIS event, or what the stated
+process holds constant. All choices must answer that SAME transfer or quantity.
+Do not mix work BY and work ON the system in different choices. Do not ask
+an unqualified definition of "the sign of work by a system": it depends on
+expansion versus compression. State Delta U = Q - W_by when testing the sign.
+Ask about the physical decision, not "which law applies" or an abstract definition.
+Keep the answer choices at the same level: do not pit a specific first-law
+equation against the general statement of energy conservation, since both
+can be true. Do not imply an isothermal or adiabatic process unless stated.
+Do not include MCP, tool names or the final numerical result in the check.
+"""
+    tutoring_guidance = """
+Thermodynamics tutoring: identify the system, process, givens and sign convention.
+Ask one next-step question and wait for the student's attempt. Use Delta U = Q - W,
+with heat into the system positive and work BY the system positive. Work ON the
+system is the negative of work by it. For an ideal gas, isothermal means constant
+temperature and Delta U = 0, not Q = 0. Adiabatic means Q = 0, not constant
+temperature. An isochoric process has zero boundary work, but can transfer heat.
+Use P Delta V only at constant pressure. Heat and work are transfers, not stored
+state properties. Q = mc Delta T assumes no phase change and the stated specific
+heat; a temperature difference has the same numerical value in kelvin and Celsius.
+Absolute gas-law and Carnot temperatures MUST be in kelvin. For Celsius absolute
+temperatures convert T_K = T_C + 273.15 before those calculations. Carnot
+efficiency 1 - T_c/T_h is an upper bound for an engine, not a promise for a real
+engine; require T_h > T_c > 0. Do not assume a process, amount of gas, material's
+specific heat, heat input, or reservoir temperature. Ask for missing information.
+Use first_law_thermodynamics for Q, work or Delta U; use ideal_gas_law for states,
+passing only known state quantities in gas_data. OMIT the unknown state variable
+or use null: pressure=0 is not a placeholder for unknown pressure, and an ideal
+gas at positive volume, amount and temperature cannot have zero absolute pressure.
+Use heat_transfer for sensible heat, and constant_pressure_work only when constant
+pressure is specified. Use numerical tools for every numerical result. Show
+complete working for direct solves. In guided reflection or an unfinished
+check-in, give one hint without disclosing the final answer. 'I'm lost' asks for
+a smaller prerequisite, not a full solution; honor explicit full-solution requests.
+"""
+
+    def _ground_worked_solution(self, worked, tool_outputs):
+        return ground_domain_working(worked, tool_outputs)
 
     def __init__(
         self,
@@ -73,6 +121,8 @@ Available MCP tools:
 - thermal_expansion: Linear and volumetric expansion
 - heat_conduction: Fourier's Law for heat flow
 - carnot_efficiency: Maximum efficiency of heat engines
+- first_law_thermodynamics: Calculate heat, work, or change in internal energy
+- constant_pressure_work: Boundary work at explicitly constant pressure
 
 Always:
 - Use SI units in calculations

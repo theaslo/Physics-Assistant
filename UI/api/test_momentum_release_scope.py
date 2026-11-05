@@ -10,11 +10,18 @@ from strands_agents.angular_motion_agent import AngularMotionAgent
 from strands_agents.thermodynamics_agent import ThermodynamicsAgent
 
 
-class MomentumReleaseScopeTests(unittest.TestCase):
-    def test_only_momentum_uses_the_new_contextual_gate_by_default(self):
+class ContextualRolloutScopeTests(unittest.TestCase):
+    def test_deployments_can_disable_or_limit_contextual_checks(self):
+        for setting, expected in (("", set()), ("energy_agent", {"energy_agent"})):
+            with patch.dict(os.environ, {"HITL_CONTEXTUAL_AGENTS": setting}, clear=True):
+                gate = KnowledgeTransferGate('http://unused')
+            self.assertEqual(gate.contextual_agents, expected)
+
+    def test_all_four_domains_use_contextual_checks_and_worked_solutions(self):
         with patch.dict(os.environ, {}, clear=True):
             gate = KnowledgeTransferGate('http://unused')
-        self.assertEqual(gate.contextual_agents, {'momentum_agent'})
-        self.assertEqual(MECHANICS_AGENTS, {'momentum_agent'})
+        self.assertEqual(gate.contextual_agents, {'momentum_agent', 'energy_agent', 'angular_motion_agent', 'thermodynamics_agent'})
+        self.assertEqual(MECHANICS_AGENTS, gate.contextual_agents)
         for cls in (EnergyAgent, AngularMotionAgent, ThermodynamicsAgent):
-            self.assertFalse(issubclass(cls, ConversationPhysicsAgent))
+            self.assertTrue(issubclass(cls, ConversationPhysicsAgent))
+            self.assertTrue(cls.worked_solution_required)

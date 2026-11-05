@@ -6,10 +6,11 @@ Uses Strands SDK with MCP energy tools
 
 import os
 from typing import Dict, Any
-from .base_physics_agent import StrandsPhysicsAgent
+from physics_worked_solutions import ground_domain_working
+from .conversation_agent import ConversationPhysicsAgent
 
 
-class EnergyAgent(StrandsPhysicsAgent):
+class EnergyAgent(ConversationPhysicsAgent):
     """
     Strands-based agent for energy problems
 
@@ -21,6 +22,32 @@ class EnergyAgent(StrandsPhysicsAgent):
     - Work-energy theorem
     - Power (P = W/t)
     """
+
+    worked_solution_required = True
+    verify_numerical_completeness = True
+    tutoring_guidance = """
+Energy tutoring: keep the student's actual system, endpoints and givens. Ask
+one question at a time about the next physical decision, then wait for the
+student's attempt. Distinguish work by one force from net work. Use the angle
+between force and displacement; friction's work can be negative. Kinetic energy
+is a nonnegative scalar even for a negative signed velocity. State the reference
+for gravitational potential energy; a negative height relative to that reference
+is allowed. Mechanical energy is conserved only when the chosen system's
+nonconservative work is zero. Friction transforms energy into internal energy;
+it does not destroy total energy. Use W_net = Delta K or
+K_i + U_i + W_nonconservative = K_f + U_f as appropriate.
+Do not assume an unspecified mass, spring constant, initial rest, height, or
+force direction. Ask for missing givens. Standard near-Earth gravity 9.81 m/s^2
+may be used if stated. For a falling body, the gain in kinetic energy is minus
+the change in potential energy, not an absolute potential energy for an arbitrary
+reference. Power is an energy transfer rate, in watts; work/energy is in joules.
+Use numerical tools for calculations. Give a complete worked solution for a
+direct numerical solve. During hints or an unfinished check-in, do not disclose
+the final result. 'I'm lost' asks for a smaller prerequisite, not a full solution.
+"""
+
+    def _ground_worked_solution(self, worked, tool_outputs):
+        return ground_domain_working(worked, tool_outputs)
 
     def __init__(
         self,
@@ -86,6 +113,7 @@ Available MCP tools:
 - calculate_kinetic_energy_tool: Calculate kinetic energy
 - calculate_gravitational_potential_energy_tool: Calculate gravitational potential energy
 - calculate_elastic_potential_energy_tool: Calculate spring potential energy
+- calculate_power_tool: Calculate average power from work and elapsed time
 - work_energy_theorem: Apply the work-energy theorem
 - energy_conservation: Apply conservation of mechanical energy
 - energy_with_friction: Analyze frictional energy losses

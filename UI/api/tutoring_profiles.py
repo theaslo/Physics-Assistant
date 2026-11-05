@@ -6,6 +6,9 @@ from force_quiz_reflection import is_force_quiz_reflection_prompt
 PRINCIPLES_TOOLS = {
     "forces_agent": "get_force_principles",
     "momentum_agent": "get_momentum_principles",
+    "energy_agent": "get_energy_principles",
+    "angular_motion_agent": "get_angular_motion_principles",
+    "thermodynamics_agent": "get_thermodynamics_principles",
 }
 CONVERSATION_AGENTS = frozenset(PRINCIPLES_TOOLS)
 MECHANICS_AGENTS = CONVERSATION_AGENTS - {"forces_agent"}

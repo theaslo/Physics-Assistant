@@ -96,33 +96,10 @@ general and special forms can both be correct. Offer mutually exclusive
 principles with exactly one correct choice under the stated conditions.
 """
 
-    async def _review_contextual_check(self, question, check, evidence):
-        for attempt in range(2):
-            review = await self._reflection_model(
-                json.dumps({"original_problem": question, "check": check}),
-                "Independently review this multiple-choice physics check against the original problem and verified principles. "
-                "Return JSON with correct_option_ids (array of ALL physically correct option IDs) and issue (string). "
-                "Evaluate EVERY option, not just the supplied answer key. General and special forms of the same "
-                "conservation equation can both be valid. No option may require unstated assumptions or invented inputs. "
-                "Set correct_option_ids=[] if the question is ambiguous.\nVerified principles:\n" + evidence,
-                tokens=400,
-            )
-            if review.get("correct_option_ids") == [check["correct_option_id"]]:
-                return check
-            if attempt == 0:
-                check = await self._reflection_model(
-                    json.dumps({"original_problem": question, "rejected_check": check, "review": review}),
-                    "Rewrite the check to remove ambiguity and have exactly ONE correct option. "
-                    "Ask about the physical principle or system assumption for the original setup, not equations or arithmetic. "
-                    "Return JSON with needs_check=true, confidence (0 to 1), concept_tag, question, "
-                    "options (3 or 4 objects with id and text), and correct_option_id. "
-                    "Do not reveal the final answer.\nVerified principles:\n" + evidence,
-                    tokens=900,
-                )
-                check = self._validate_contextual_check(check)
-        raise RuntimeError("The tutor could not prepare an unambiguous check-in. Please try again.")
-
     def _conversation_answer_error(self, answer, *, numerical_verified=False):
+        internal_error = super()._conversation_answer_error(answer, numerical_verified=numerical_verified)
+        if internal_error:
+            return internal_error
         # Some model JSON decodes a single LaTeX backslash as a tab. Validate
         # the intended unit text too, before the frontend repairs its display.
         answer = answer.replace("\t" + "ext{", r"\text{")
